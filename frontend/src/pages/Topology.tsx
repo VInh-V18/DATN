@@ -1,14 +1,29 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { fetchTopology } from '../api/client'
 import type { Topology } from '../api/types'
+import { useLiveEvents } from '../hooks/useLiveEvents'
 
 export default function TopologyPage() {
   const [topology, setTopology] = useState<Topology | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
+  const reload = useCallback(() => {
     fetchTopology().then(setTopology).catch((err) => setError(String(err)))
   }, [])
+
+  useEffect(reload, [reload])
+
+  useLiveEvents((event) => {
+    if (event.type === 'topology_updated') reload()
+  })
+
+  const portLabel = (interfaceId: string): string => {
+    for (const device of topology?.devices ?? []) {
+      const iface = device.interfaces.find((i) => i.id === interfaceId)
+      if (iface) return `${device.name} / ${iface.name}`
+    }
+    return interfaceId
+  }
 
   return (
     <div className="page">
@@ -45,8 +60,8 @@ export default function TopologyPage() {
         <tbody>
           {topology?.links.map((link) => (
             <tr key={link.id}>
-              <td>{link.port_a_id}</td>
-              <td>{link.port_b_id}</td>
+              <td>{portLabel(link.port_a_id)}</td>
+              <td>{portLabel(link.port_b_id)}</td>
               <td>
                 <span className={`badge status-${link.status}`}>{link.status}</span>
               </td>

@@ -12,11 +12,13 @@ import logging
 import re
 from datetime import datetime
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.automation.device_client import DeviceClient, DeviceCredentials
 from app.core.config import get_settings
-from app.models.models import Anomaly, Device
+from app.core.events import emit
+from app.models.models import Anomaly, Device, Interface, LinkStatus, TopologyLink
 from app.monitoring.anomaly import AnomalyDetector, build_feature_vector
 from app.monitoring.correlation import EventCorrelator
 from app.monitoring.influx_client import InfluxMetricsStore
@@ -35,7 +37,21 @@ def _parse_cpu_percent(show_processes_cpu: str) -> float:
     return float(match.group(1)) if match else 0.0
 
 
-def collect_device_sample(device: Device) -> list[float] | None:
+# `scripts/gns3_lab.py` seed các interface với tên quy ước "portN" (N là số cổng
+# adapter trong lab_topology.yaml), trong khi thiết bị thật trả về tên kiểu
+# "GigabitEthernet0/1". Với các template một khe cắm (ví dụ Cisco IOSv trong
+# GNS3), số sau dấu "/" cuối cùng chính là số cổng adapter - dùng làm cầu nối
+# giữa tên interface thật và tên đã seed. Đây là suy đoán phù hợp quy mô lab,
+# không đúng với mọi loại thiết bị/slot phức tạp.
+_PORT_NUMBER_PATTERN = re.compile(r"/(\d+)$")
+
+
+def _parse_port_number(interface_name: str) -> int | None:
+    match = _PORT_NUMBER_PATTERN.search(interface_name)
+    return int(match.group(1)) if match else None
+
+
+def collect_device_sample(device: Device) -> tuple[list[float], list[dict]] | None:
     if not device.management_address:
         return None
     try:
@@ -44,7 +60,7 @@ def collect_device_sample(device: Device) -> list[float] | None:
             interfaces = dc.get_interfaces_status()
             down_count = sum(1 for i in interfaces if i["status"].lower() != "up")
             cpu = _parse_cpu_percent(cpu_raw)
-            return build_feature_vector(
+            vector = build_feature_vector(
                 cpu_percent=cpu,
                 memory_percent=0.0,
                 bandwidth_in_mbps=0.0,
@@ -54,9 +70,54 @@ def collect_device_sample(device: Device) -> list[float] | None:
                 port_flap_count=float(down_count),
                 syslog_rate=0.0,
             )
+            return vector, interfaces
     except Exception:  # thiết bị có thể đang tắt hoặc không truy cập được
         logger.exception("Không thể thu thập số liệu từ thiết bị %s", device.id)
         return None
+
+
+def sync_interface_status(db: Session, device: Device, live_interfaces: list[dict]) -> bool:
+    """Ghi trạng thái interface thật (đọc qua Netmiko) vào bảng interfaces/topology_links.
+
+    Trả về True nếu có ít nhất một interface/link đổi trạng thái - dùng để quyết
+    định có cần phát sự kiện `topology_updated` hay không (UC1: giám sát trạng
+    thái mạng theo thời gian thực, Bảng 3.2 GET /api/topology).
+    """
+    changed = False
+    touched_interface_ids: set[str] = set()
+
+    for live in live_interfaces:
+        port_number = _parse_port_number(live["name"])
+        if port_number is None:
+            continue
+        seeded_name = f"port{port_number}"
+        iface = db.query(Interface).filter_by(device_id=device.id, name=seeded_name).first()
+        if iface is None:
+            continue  # interface chưa được seed vào DB (xem scripts/gns3_lab.py)
+
+        new_status = LinkStatus.up if live["status"].lower() == "up" else LinkStatus.down
+        if iface.status != new_status or iface.ip_address != live.get("ip_address"):
+            iface.status = new_status
+            iface.ip_address = live.get("ip_address")
+            changed = True
+        touched_interface_ids.add(iface.id)
+
+    if touched_interface_ids:
+        links = db.execute(
+            select(TopologyLink).where(
+                TopologyLink.port_a_id.in_(touched_interface_ids) | TopologyLink.port_b_id.in_(touched_interface_ids)
+            )
+        ).scalars().all()
+        for link in links:
+            both_up = link.port_a.status == LinkStatus.up and link.port_b.status == LinkStatus.up
+            new_link_status = LinkStatus.up if both_up else LinkStatus.down
+            if link.status != new_link_status:
+                link.status = new_link_status
+                changed = True
+
+    if changed:
+        db.commit()
+    return changed
 
 
 def collect_once(db: Session, devices: list[Device]) -> list[Anomaly]:
@@ -64,10 +125,15 @@ def collect_once(db: Session, devices: list[Device]) -> list[Anomaly]:
     correlator = EventCorrelator(db)
     new_anomalies: list[Anomaly] = []
 
+    topology_changed = False
     for device in devices:
-        vector = collect_device_sample(device)
-        if vector is None:
+        sample = collect_device_sample(device)
+        if sample is None:
             continue
+        vector, live_interfaces = sample
+
+        if sync_interface_status(db, device, live_interfaces):
+            topology_changed = True
 
         metrics_store.write_metric(
             device.id,
@@ -111,6 +177,8 @@ def collect_once(db: Session, devices: list[Device]) -> list[Anomaly]:
             new_anomalies.append(anomaly)
 
     metrics_store.close()
+    if topology_changed:
+        emit("topology_updated", {})
     return new_anomalies
 
 
