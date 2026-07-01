@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { approveIncident, fetchIncidentActions, fetchIncidents } from '../api/client'
 import type { ActionLog, Incident } from '../api/types'
+import { useLiveEvents } from '../hooks/useLiveEvents'
+
+const RELEVANT_EVENTS = new Set(['incident_created', 'incident_updated'])
 
 export default function IncidentsPage() {
   const [incidents, setIncidents] = useState<Incident[]>([])
@@ -8,7 +11,13 @@ export default function IncidentsPage() {
   const [actions, setActions] = useState<ActionLog[]>([])
   const [error, setError] = useState<string | null>(null)
 
-  const load = () => fetchIncidents().then(setIncidents).catch((err) => setError(String(err)))
+  const load = () =>
+    fetchIncidents()
+      .then((list) => {
+        setIncidents(list)
+        setSelected((prev) => (prev ? list.find((i) => i.id === prev.id) ?? prev : prev))
+      })
+      .catch((err) => setError(String(err)))
 
   useEffect(() => {
     load()
@@ -27,6 +36,15 @@ export default function IncidentsPage() {
       await openDetail(incident)
     }
   }
+
+  useLiveEvents(async (event) => {
+    if (!RELEVANT_EVENTS.has(event.type)) return
+    await load()
+    if (selected) {
+      const logs = await fetchIncidentActions(selected.id)
+      setActions(logs)
+    }
+  })
 
   return (
     <div className="page split">

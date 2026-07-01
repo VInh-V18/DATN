@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { approveSecurityAlert, fetchSecurityAlerts } from '../api/client'
 import type { SecurityAlert } from '../api/types'
+import { useLiveEvents } from '../hooks/useLiveEvents'
+
+const RELEVANT_EVENTS = new Set(['security_alert_created', 'security_alert_updated'])
 
 export default function SecurityPage() {
   const [alerts, setAlerts] = useState<SecurityAlert[]>([])
@@ -11,6 +14,10 @@ export default function SecurityPage() {
   useEffect(() => {
     load()
   }, [])
+
+  useLiveEvents((event) => {
+    if (RELEVANT_EVENTS.has(event.type)) load()
+  })
 
   const handleApproval = async (alert: SecurityAlert, approved: boolean) => {
     await approveSecurityAlert(alert.id, approved)

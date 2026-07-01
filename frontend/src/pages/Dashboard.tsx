@@ -1,6 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { fetchIncidents, fetchSecurityAlerts, fetchTopology } from '../api/client'
 import type { Incident, SecurityAlert, Topology } from '../api/types'
+import { useLiveEvents } from '../hooks/useLiveEvents'
+
+const RELEVANT_EVENTS = new Set([
+  'incident_created',
+  'incident_updated',
+  'security_alert_created',
+  'security_alert_updated',
+])
 
 export default function Dashboard() {
   const [topology, setTopology] = useState<Topology | null>(null)
@@ -8,7 +16,7 @@ export default function Dashboard() {
   const [alerts, setAlerts] = useState<SecurityAlert[]>([])
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
+  const reload = useCallback(() => {
     Promise.all([fetchTopology(), fetchIncidents(), fetchSecurityAlerts()])
       .then(([topo, inc, sec]) => {
         setTopology(topo)
@@ -17,6 +25,12 @@ export default function Dashboard() {
       })
       .catch((err) => setError(String(err)))
   }, [])
+
+  useEffect(reload, [reload])
+
+  useLiveEvents((event) => {
+    if (RELEVANT_EVENTS.has(event.type)) reload()
+  })
 
   const openIncidents = incidents.filter((i) => i.status !== 'resolved' && i.status !== 'failed')
   const activeAlerts = alerts.filter((a) => a.status !== 'blocked' && a.status !== 'rejected')
