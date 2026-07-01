@@ -1,5 +1,5 @@
 import { Route, Routes } from 'react-router-dom'
-import NavBar from './components/NavBar'
+import Sidebar from './components/Sidebar'
 import Dashboard from './pages/Dashboard'
 import TopologyPage from './pages/Topology'
 import IncidentsPage from './pages/Incidents'
@@ -9,7 +9,7 @@ import ChatPage from './pages/Chat'
 function App() {
   return (
     <div className="app-shell">
-      <NavBar />
+      <Sidebar />
       <main className="app-content">
         <Routes>
           <Route path="/" element={<Dashboard />} />
