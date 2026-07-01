@@ -3,8 +3,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agent.self_healing import SelfHealingAgent
-from app.api.deps import get_llm, get_tool_executor
+from app.api.deps import get_llm, get_tool_executor, require_approver
 from app.core.database import get_db
+from app.core.security import TokenPayload
 from app.llm.client import LLMClient
 from app.models.models import ActionLog, Incident
 from app.schemas.schemas import ActionLogOut, ApprovalRequest, IncidentOut
@@ -39,8 +40,9 @@ def approve_incident_action(
     db: Session = Depends(get_db),
     executor: ToolExecutor = Depends(get_tool_executor),
     llm: LLMClient = Depends(get_llm),
+    approver: TokenPayload = Depends(require_approver),
 ) -> Incident:
-    """Bảng 3.2: POST /api/incidents/{id}/approve - phê duyệt hành động khắc phục."""
+    """Bảng 3.2: POST /api/incidents/{id}/approve - phê duyệt hành động khắc phục (UC4, chỉ kỹ sư/admin)."""
     incident = db.get(Incident, incident_id)
     if incident is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy sự cố")
@@ -48,12 +50,12 @@ def approve_incident_action(
         raise HTTPException(status_code=400, detail="Sự cố không có hành động nào đang chờ phê duyệt")
 
     if not approval.approved:
-        incident.pending_action = {**incident.pending_action, "approved": False}
+        incident.pending_action = {**incident.pending_action, "approved": False, "approver": approver.username}
         db.commit()
         db.refresh(incident)
         return incident
 
-    incident.pending_action = {**incident.pending_action, "approved": True}
+    incident.pending_action = {**incident.pending_action, "approved": True, "approver": approver.username}
     db.commit()
 
     agent = SelfHealingAgent(db=db, executor=executor, llm=llm)

@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_tool_executor
+from app.api.deps import get_tool_executor, require_approver
 from app.core.database import get_db
+from app.core.security import TokenPayload
 from app.models.models import SecurityAlert
 from app.schemas.schemas import ApprovalRequest, SecurityAlertOut
 from app.security.playbook import SecurityPlaybook
@@ -36,6 +37,7 @@ def approve_security_response(
     approval: ApprovalRequest,
     db: Session = Depends(get_db),
     executor: ToolExecutor = Depends(get_tool_executor),
+    approver: TokenPayload = Depends(require_approver),
 ) -> dict:
     """Phê duyệt phản ứng an ninh rủi ro cao (block_ip / isolate_node), đồng nhất guardrail với mục 3.3.2."""
     alert = db.get(SecurityAlert, alert_id)
@@ -43,6 +45,7 @@ def approve_security_response(
         raise HTTPException(status_code=404, detail="Không tìm thấy cảnh báo")
     if not approval.approved:
         alert.status = "rejected"
+        alert.details = {**(alert.details or {}), "rejected_by": approver.username}
         db.commit()
         return {"status": alert.status}
 

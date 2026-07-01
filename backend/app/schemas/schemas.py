@@ -91,3 +91,22 @@ class ApprovalRequest(BaseModel):
     approved: bool
     approver: str | None = None
     comment: str | None = None
+
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    role: str | None = None
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    username: str
+    role: str
+
+
+class TokenOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"

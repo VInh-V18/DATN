@@ -1,0 +1,92 @@
+# Mô hình mạng thử nghiệm - mục 5.1, Bảng 5.1 của đề cương.
+#
+# `template_name` phải khớp với tên một template đã được đăng ký sẵn trên
+# GNS3 server của bạn (Edit > Preferences > ... trong GNS3 GUI, hoặc GET
+# /v2/templates). Sửa lại các giá trị này cho phù hợp với template thật
+# (ví dụ ảnh Cisco IOSv/IOU, VPCS cho host, Docker image cho IoT/attacker)
+# trước khi chạy `python -m scripts.gns3_lab create`.
+
+project_name: ai_agent_lab
+
+devices:
+  - name: R1
+    role: router
+    template_name: "Cisco IOSv"
+    note: "Router biên (Edge/Firewall): kết nối vùng ngoài, áp ACL, chạy OSPF"
+    x: -300
+    y: -150
+
+  - name: R2
+    role: router
+    template_name: "Cisco IOSv"
+    note: "Router lõi (Core): trung chuyển lưu lượng, OSPF, nhiều interface"
+    x: 0
+    y: -150
+
+  - name: R3
+    role: router
+    template_name: "Cisco IOSv"
+    note: "Router phân phối: kết nối mạng nội bộ và IoT, chạy OSPF"
+    x: 300
+    y: -150
+
+  - name: SW1
+    role: switch
+    template_name: "Ethernet switch"
+    note: "Switch lớp 2/3: VLAN, kết nối các host"
+    x: -150
+    y: 0
+
+  - name: SW2
+    role: switch
+    template_name: "Ethernet switch"
+    note: "Switch lớp 2/3: VLAN, kết nối các host"
+    x: 150
+    y: 0
+
+  - name: H1
+    role: host
+    template_name: "VPCS"
+    note: "Máy trạm người dùng: sinh/nhận lưu lượng người dùng"
+    x: -250
+    y: 150
+
+  - name: H2
+    role: host
+    template_name: "VPCS"
+    note: "Máy trạm người dùng: sinh/nhận lưu lượng người dùng"
+    x: -50
+    y: 150
+
+  - name: IOT1
+    role: iot
+    template_name: "VPCS"
+    note: "Thiết bị IoT mô phỏng: cảm biến hoặc dịch vụ nhẹ"
+    x: 250
+    y: 150
+
+  - name: AGENT_SERVER
+    role: server
+    template_name: "Docker - agent-runtime"
+    note: "Máy chủ Agent: chạy runtime, LLM, InfluxDB, web (thường chạy ngoài GNS3)"
+    x: 450
+    y: 0
+
+  - name: ATTACKER
+    role: attacker
+    template_name: "Kali Linux"
+    note: "Máy tấn công: công cụ quét cổng và sinh tấn công DoS"
+    x: 450
+    y: 150
+
+# Liên kết giữa các thiết bị theo topology mục 5.1 (danh sách cặp tên thiết bị).
+# `port` là số cổng adapter mặc định trên mỗi thiết bị - điều chỉnh theo template thật.
+links:
+  - { a: R1, a_port: 0, b: R2, b_port: 0 }
+  - { a: R2, a_port: 1, b: R3, b_port: 0 }
+  - { a: R2, a_port: 2, b: SW1, b_port: 0 }
+  - { a: R3, a_port: 1, b: SW2, b_port: 0 }
+  - { a: SW1, a_port: 1, b: H1, b_port: 0 }
+  - { a: SW1, a_port: 2, b: H2, b_port: 0 }
+  - { a: SW2, a_port: 1, b: IOT1, b_port: 0 }
+  - { a: R1, a_port: 1, b: ATTACKER, b_port: 0 }
