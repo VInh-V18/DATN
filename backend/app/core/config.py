@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     agent_require_approval_for_high_risk: bool = True
     collector_interval_seconds: int = 10
 
+    # Lớp An ninh: syslog UDP listener (mục 3.3.1, 3.3.4)
+    syslog_udp_host: str = "0.0.0.0"
+    syslog_udp_port: int = 5514
+    # Thiết bị biên (ví dụ R1) dùng làm nơi thực thi block_ip khi phát hiện tấn công qua syslog.
+    security_edge_device_id: str | None = None
+
     # Auth
     secret_key: str = "change-me-in-production"
     access_token_expire_minutes: int = 60 * 8

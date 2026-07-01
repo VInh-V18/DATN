@@ -130,6 +130,14 @@ sát và điều khiển.
   phản hồi Copilot, tỉ lệ phản ứng an ninh đúng...) trực tiếp từ DB; các chỉ số cần nhãn
   thực tế (độ chính xác chẩn đoán, recall phát hiện tấn công) nhận nhãn qua `--labels`.
 - Dashboard React: Tổng quan, Topology, Sự cố (kèm phê duyệt), An ninh (kèm phê duyệt), Chat Copilot.
+- Runtime nền được nối liền trong `app/main.py` (lifespan): vòng lặp collector
+  (`monitoring/collector.py`), syslog UDP listener thật (`security/syslog_listener.py`,
+  mặc định cổng 5514) và event bus đồng bộ→bất đồng bộ (`core/events.py`) phát realtime qua
+  `/ws/events` mỗi khi có incident/security alert mới hoặc đổi trạng thái. Đã kiểm thử
+  end-to-end: gửi bản tin syslog "Failed password..." giả lập → phát hiện SSH brute-force
+  → tạo security_alert + ánh xạ ATT&CK → nhận được `security_alert_created`/`_updated` qua
+  WebSocket. Có cơ chế cooldown (5 phút/chỉ báo/IP) chống cảnh báo trùng lặp khi tấn công
+  còn tiếp diễn.
 
 Các hạng mục còn để ngỏ cho các giai đoạn tiếp theo của kế hoạch (Bảng 5.4, GĐ1–GĐ6):
 
@@ -137,8 +145,10 @@ Các hạng mục còn để ngỏ cho các giai đoạn tiếp theo của kế 
   khớp với `lab_topology.yaml`) để có lab vật lý/ảo thật sự, thay vì chỉ kiểm thử bằng đơn vị.
 - Chạy các kịch bản KB01–KB10 trên lab thật, thu thập nhãn thực tế (root cause, tấn công đã
   biết) rồi chạy `scripts/evaluate.py --labels ...` để có số liệu Bảng 5.3 đầy đủ.
-- Kết nối syslog/netflow thật vào `SecurityDetectionEngine.ingest_*` (hiện expose sẵn API
-  nhưng chưa có nguồn dữ liệu thật).
+- Cấu hình thiết bị Cisco IOS trong lab thật đẩy syslog tới agent server
+  (`logging host <IP> transport udp port 5514`) và/hoặc bổ sung nguồn netflow thật
+  (hiện `SecurityDetectionEngine.ingest_flow`/`ingest_syn` đã sẵn sàng nhưng chưa có
+  listener netflow, chỉ mới nối syslog cho SSH brute-force).
 - Huấn luyện/đánh giá Isolation Forest trên dữ liệu thực nghiệm thay vì cửa sổ trượt mặc định.
 - Áp JWT cho các endpoint đọc dữ liệu (hiện chỉ hai endpoint phê duyệt yêu cầu đăng nhập,
   phù hợp quy mô phòng lab).

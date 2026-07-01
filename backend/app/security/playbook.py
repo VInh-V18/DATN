@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from app.core.events import emit
 from app.models.models import AttackMapping, SecurityAlert, Severity
 from app.security.attack_mapping import map_indicators
 from app.security.detection import DetectionResult
@@ -58,6 +59,7 @@ class SecurityPlaybook:
                 )
             )
         self.db.commit()
+        emit("security_alert_created", {"alert_id": alert.id, "attack_type": alert.attack_type})
 
         if edge_node_id is None:
             alert.status = "alert_only"
@@ -71,6 +73,7 @@ class SecurityPlaybook:
             alert.status = "awaiting_approval"
             alert.details = {**alert.details, "pending_action": {"tool": response_tool, "node_id": edge_node_id}}
             self.db.commit()
+            emit("security_alert_updated", {"alert_id": alert.id, "status": alert.status})
             return PlaybookResult(status="awaiting_approval", alert_id=alert.id)
 
         return self._execute_response(alert, response_tool, edge_node_id)
@@ -88,4 +91,5 @@ class SecurityPlaybook:
         result = self.executor.execute(tool, arguments)
         alert.status = "blocked" if result.ok else "response_failed"
         self.db.commit()
+        emit("security_alert_updated", {"alert_id": alert.id, "status": alert.status})
         return PlaybookResult(status=alert.status, alert_id=alert.id)

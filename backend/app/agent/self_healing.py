@@ -24,6 +24,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.events import emit
 from app.llm.client import LLMClient, ToolCall
 from app.models.models import ActionLog, Device, Incident, IncidentStatus
 from app.tools.executor import GuardrailViolation, ToolExecutor
@@ -201,6 +202,7 @@ class SelfHealingAgent:
                 incident.status = IncidentStatus.awaiting_approval
                 incident.pending_action = {"tool": plan.tool, "arguments": plan.arguments, "approved": False}
                 self.db.commit()
+                emit("incident_updated", {"incident_id": incident.id, "status": incident.status.value})
                 return RemediationResult(status="awaiting_approval", detail=plan.rationale)
 
             snapshot = self._snapshot_device(plan.node_id)
@@ -229,4 +231,5 @@ class SelfHealingAgent:
 
             incident.resolved_at = datetime.utcnow()
         self.db.commit()
+        emit("incident_updated", {"incident_id": incident.id, "status": incident.status.value})
         return RemediationResult(status=status.value, detail=detail)

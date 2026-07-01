@@ -21,6 +21,10 @@ SYN_FLOOD_COUNT_THRESHOLD = 100
 SSH_BRUTEFORCE_WINDOW = timedelta(seconds=60)
 SSH_BRUTEFORCE_FAILURE_THRESHOLD = 5
 
+# Thời gian tối thiểu giữa hai lần báo cảnh báo liên tiếp cho cùng (chỉ báo, IP nguồn),
+# tránh sinh cảnh báo trùng lặp khi hành vi tấn công vẫn tiếp diễn (giảm nhiễu, mục 2.6).
+ALERT_COOLDOWN = timedelta(minutes=5)
+
 
 @dataclass
 class DetectionResult:
@@ -41,6 +45,7 @@ class SecurityDetectionEngine:
         self._port_hits: dict[str, deque[tuple[datetime, int]]] = defaultdict(deque)
         self._syn_hits: dict[str, deque[datetime]] = defaultdict(deque)
         self._login_failures: dict[str, deque[datetime]] = defaultdict(deque)
+        self._last_alert_at: dict[tuple[str, str], datetime] = {}
 
     def ingest_flow(self, src_ip: str, dst_port: int, timestamp: datetime | None = None) -> DetectionResult | None:
         ts = timestamp or datetime.utcnow()
@@ -48,7 +53,7 @@ class SecurityDetectionEngine:
         window.append((ts, dst_port))
         self._evict(window, ts, PORT_SCAN_WINDOW)
         distinct_ports = {port for _, port in window}
-        if len(distinct_ports) >= PORT_SCAN_DISTINCT_PORT_THRESHOLD:
+        if len(distinct_ports) >= PORT_SCAN_DISTINCT_PORT_THRESHOLD and self._should_alert("port_scan", src_ip, ts):
             return DetectionResult(
                 indicator="port_scan", source_ip=src_ip, detail={"distinct_ports": len(distinct_ports)}
             )
@@ -59,7 +64,7 @@ class SecurityDetectionEngine:
         window = self._syn_hits[src_ip]
         window.append(ts)
         self._evict(window, ts, SYN_FLOOD_WINDOW)
-        if len(window) >= SYN_FLOOD_COUNT_THRESHOLD:
+        if len(window) >= SYN_FLOOD_COUNT_THRESHOLD and self._should_alert("syn_flood", src_ip, ts):
             return DetectionResult(indicator="syn_flood", source_ip=src_ip, detail={"half_open_count": len(window)})
         return None
 
@@ -68,11 +73,20 @@ class SecurityDetectionEngine:
         window = self._login_failures[src_ip]
         window.append(ts)
         self._evict(window, ts, SSH_BRUTEFORCE_WINDOW)
-        if len(window) >= SSH_BRUTEFORCE_FAILURE_THRESHOLD:
+        if len(window) >= SSH_BRUTEFORCE_FAILURE_THRESHOLD and self._should_alert("ssh_bruteforce", src_ip, ts):
             return DetectionResult(
                 indicator="ssh_bruteforce", source_ip=src_ip, detail={"failed_attempts": len(window)}
             )
         return None
+
+    def _should_alert(self, indicator: str, src_ip: str, ts: datetime) -> bool:
+        """Chỉ cho phép báo lại cùng (chỉ báo, IP) sau ALERT_COOLDOWN, tránh cảnh báo trùng lặp."""
+        key = (indicator, src_ip)
+        last = self._last_alert_at.get(key)
+        if last is not None and ts - last < ALERT_COOLDOWN:
+            return False
+        self._last_alert_at[key] = ts
+        return True
 
     @staticmethod
     def _evict(window: deque, now: datetime, max_age: timedelta) -> None:

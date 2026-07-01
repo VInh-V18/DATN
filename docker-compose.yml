@@ -47,6 +47,7 @@ services:
         condition: service_started
     ports:
       - "8000:8000"
+      - "5514:5514/udp"
     volumes:
       - ./backend/app:/app/app
 

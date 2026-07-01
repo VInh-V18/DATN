@@ -21,6 +21,8 @@ def test_port_scan_detection_triggers_after_threshold() -> None:
     result = None
     for port in range(1, 20):
         result = engine.ingest_flow("10.0.0.5", port, timestamp=now + timedelta(milliseconds=port))
+        if result is not None:
+            break
     assert result is not None
     assert result.indicator == "port_scan"
     assert result.source_ip == "10.0.0.5"
@@ -32,5 +34,23 @@ def test_ssh_bruteforce_detection() -> None:
     result = None
     for i in range(6):
         result = engine.ingest_failed_login("10.0.0.9", timestamp=now + timedelta(seconds=i))
+        if result is not None:
+            break
     assert result is not None
     assert result.indicator == "ssh_bruteforce"
+
+
+def test_ssh_bruteforce_cooldown_suppresses_duplicate_alert() -> None:
+    engine = SecurityDetectionEngine()
+    now = datetime.utcnow()
+    first_alert = None
+    for i in range(6):
+        r = engine.ingest_failed_login("10.0.0.9", timestamp=now + timedelta(seconds=i))
+        if r is not None:
+            first_alert = r
+            break
+    assert first_alert is not None
+
+    # Các lần thất bại tiếp theo ngay sau đó không nên tạo thêm cảnh báo trùng lặp.
+    duplicate = engine.ingest_failed_login("10.0.0.9", timestamp=now + timedelta(seconds=10))
+    assert duplicate is None

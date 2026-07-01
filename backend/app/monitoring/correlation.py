@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.events import emit
 from app.models.models import Anomaly, Incident, IncidentStatus, TopologyLink
 
 CORRELATION_WINDOW = timedelta(seconds=30)
@@ -56,6 +57,7 @@ class EventCorrelator:
                 merged = set(incident.device_ids) | {new_anomaly.device_id}
                 incident.device_ids = list(merged)
                 self.db.commit()
+                emit("incident_updated", {"incident_id": incident.id, "status": incident.status.value})
                 return incident
 
         incident = Incident(
@@ -67,6 +69,7 @@ class EventCorrelator:
         self.db.add(incident)
         self.db.commit()
         self.db.refresh(incident)
+        emit("incident_created", {"incident_id": incident.id, "status": incident.status.value})
         return incident
 
 
