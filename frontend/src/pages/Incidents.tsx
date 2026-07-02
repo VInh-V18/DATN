@@ -6,6 +6,7 @@ import type { ActionLog, Incident } from '../api/types'
 import { useLiveEvents } from '../hooks/useLiveEvents'
 import { StatusBadge } from '../components/StatusBadge'
 import { EmptyState } from '../components/EmptyState'
+import { SkeletonTableRows } from '../components/Skeleton'
 
 const RELEVANT_EVENTS = new Set(['incident_created', 'incident_updated'])
 
@@ -71,7 +72,7 @@ export default function IncidentsPage() {
 
       <div className="split">
         <div className="table-wrap">
-          {incidents.length === 0 && !loading ? (
+          {!loading && incidents.length === 0 ? (
             <EmptyState icon={Siren} title="Chưa có sự cố nào" subtitle="Sự cố sẽ tự động xuất hiện khi agent phát hiện bất thường." />
           ) : (
             <table className="data-table">
@@ -84,7 +85,8 @@ export default function IncidentsPage() {
                 </tr>
               </thead>
               <tbody>
-                {incidents.map((incident) => (
+                {loading && <SkeletonTableRows rows={5} cols={4} />}
+                {!loading && incidents.map((incident) => (
                   <tr
                     key={incident.id}
                     onClick={() => openDetail(incident)}

@@ -6,6 +6,7 @@ import { useLiveEvents } from '../hooks/useLiveEvents'
 import { StatCard } from '../components/StatCard'
 import { StatusBadge } from '../components/StatusBadge'
 import { EmptyState } from '../components/EmptyState'
+import { SkeletonTableRows } from '../components/Skeleton'
 
 const RELEVANT_EVENTS = new Set([
   'incident_created',
@@ -61,13 +62,14 @@ export default function Dashboard() {
       )}
 
       <div className="stat-grid">
-        <StatCard icon={Server} tone="primary" value={loading ? '—' : topology?.devices.length ?? 0} label="Thiết bị trong topology" />
-        <StatCard icon={Siren} tone="warning" value={loading ? '—' : openIncidents.length} label="Sự cố đang xử lý" />
-        <StatCard icon={ShieldAlert} tone="danger" value={loading ? '—' : activeAlerts.length} label="Cảnh báo an ninh chưa xử lý" />
+        <StatCard icon={Server} tone="primary" loading={loading} value={topology?.devices.length ?? 0} label="Thiết bị trong topology" />
+        <StatCard icon={Siren} tone="warning" loading={loading} value={openIncidents.length} label="Sự cố đang xử lý" />
+        <StatCard icon={ShieldAlert} tone="danger" loading={loading} value={activeAlerts.length} label="Cảnh báo an ninh chưa xử lý" />
         <StatCard
           icon={Cable}
           tone="success"
-          value={loading ? '—' : `${linksUp}/${topology?.links.length ?? 0}`}
+          loading={loading}
+          value={`${linksUp}/${topology?.links.length ?? 0}`}
           label="Liên kết đang hoạt động"
         />
       </div>
@@ -77,7 +79,7 @@ export default function Dashboard() {
         Sự cố gần đây
       </div>
       <div className="table-wrap">
-        {incidents.length === 0 && !loading ? (
+        {!loading && incidents.length === 0 ? (
           <EmptyState icon={Siren} title="Chưa có sự cố nào" subtitle="Hệ thống sẽ tự động ghi nhận khi phát hiện bất thường." />
         ) : (
           <table className="data-table">
@@ -89,15 +91,19 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {incidents.slice(0, 6).map((incident) => (
-                <tr key={incident.id}>
-                  <td className="cell-muted">{new Date(incident.timestamp).toLocaleString('vi-VN')}</td>
-                  <td>{incident.description}</td>
-                  <td>
-                    <StatusBadge domain="incident" value={incident.status} />
-                  </td>
-                </tr>
-              ))}
+              {loading ? (
+                <SkeletonTableRows rows={4} cols={3} />
+              ) : (
+                incidents.slice(0, 6).map((incident) => (
+                  <tr key={incident.id}>
+                    <td className="cell-muted">{new Date(incident.timestamp).toLocaleString('vi-VN')}</td>
+                    <td>{incident.description}</td>
+                    <td>
+                      <StatusBadge domain="incident" value={incident.status} />
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         )}

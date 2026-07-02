@@ -6,6 +6,7 @@ import type { Topology } from '../api/types'
 import { useLiveEvents } from '../hooks/useLiveEvents'
 import { StatusBadge } from '../components/StatusBadge'
 import { EmptyState } from '../components/EmptyState'
+import { SkeletonDeviceCards, SkeletonTableRows } from '../components/Skeleton'
 
 const ROLE_ICON: Record<string, LucideIcon> = {
   router: Router,
@@ -63,7 +64,8 @@ export default function TopologyPage() {
         </div>
       ) : (
         <div className="topology-grid">
-          {topology?.devices.map((device) => {
+          {loading && <SkeletonDeviceCards count={6} />}
+          {!loading && topology?.devices.map((device) => {
             const Icon = ROLE_ICON[device.role] ?? Server
             return (
               <div key={device.id} className={`device-node role-${device.role}`}>
@@ -102,7 +104,7 @@ export default function TopologyPage() {
         Liên kết
       </div>
       <div className="table-wrap">
-        {!topology || topology.links.length === 0 ? (
+        {!loading && (!topology || topology.links.length === 0) ? (
           <EmptyState icon={GitBranch} title="Chưa có liên kết nào" />
         ) : (
           <table className="data-table">
@@ -114,15 +116,19 @@ export default function TopologyPage() {
               </tr>
             </thead>
             <tbody>
-              {topology.links.map((link) => (
-                <tr key={link.id}>
-                  <td className="chip">{portLabel(link.port_a_id)}</td>
-                  <td className="chip">{portLabel(link.port_b_id)}</td>
-                  <td>
-                    <StatusBadge domain="link" value={link.status} />
-                  </td>
-                </tr>
-              ))}
+              {loading ? (
+                <SkeletonTableRows rows={4} cols={3} />
+              ) : (
+                topology?.links.map((link) => (
+                  <tr key={link.id}>
+                    <td className="chip">{portLabel(link.port_a_id)}</td>
+                    <td className="chip">{portLabel(link.port_b_id)}</td>
+                    <td>
+                      <StatusBadge domain="link" value={link.status} />
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         )}

@@ -5,6 +5,7 @@ import type { SecurityAlert } from '../api/types'
 import { useLiveEvents } from '../hooks/useLiveEvents'
 import { StatusBadge } from '../components/StatusBadge'
 import { EmptyState } from '../components/EmptyState'
+import { SkeletonTableRows } from '../components/Skeleton'
 
 const RELEVANT_EVENTS = new Set(['security_alert_created', 'security_alert_updated'])
 
@@ -44,7 +45,7 @@ export default function SecurityPage() {
       {error && <div className="error-banner">Không thể tải dữ liệu: {error}</div>}
 
       <div className="table-wrap">
-        {alerts.length === 0 && !loading ? (
+        {!loading && alerts.length === 0 ? (
           <EmptyState
             icon={ShieldAlert}
             title="Chưa phát hiện cảnh báo an ninh nào"
@@ -64,7 +65,8 @@ export default function SecurityPage() {
               </tr>
             </thead>
             <tbody>
-              {alerts.map((alert) => (
+              {loading && <SkeletonTableRows rows={5} cols={7} />}
+              {!loading && alerts.map((alert) => (
                 <tr key={alert.id}>
                   <td className="cell-muted">{new Date(alert.timestamp).toLocaleString('vi-VN')}</td>
                   <td className="cell-mono">{alert.source_ip}</td>
