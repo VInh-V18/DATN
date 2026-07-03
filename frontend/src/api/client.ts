@@ -1,6 +1,7 @@
 import axios from 'axios'
 import type {
   ActionLog,
+  AgentTrace,
   ChatResponse,
   Incident,
   SecurityAlert,
@@ -45,5 +46,10 @@ export async function approveSecurityAlert(alertId: string, approved: boolean): 
 
 export async function sendChatMessage(message: string, sessionId: string | null): Promise<ChatResponse> {
   const { data } = await apiClient.post<ChatResponse>('/chat', { message, session_id: sessionId })
+  return data
+}
+
+export async function fetchAgentTraces(limit = 100): Promise<AgentTrace[]> {
+  const { data } = await apiClient.get<AgentTrace[]>('/agent-traces', { params: { limit } })
   return data
 }

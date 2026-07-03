@@ -1,4 +1,4 @@
-import { LayoutDashboard, MessageCircle, Network, ShieldAlert, Siren } from 'lucide-react'
+import { Activity, LayoutDashboard, MessageCircle, Network, ShieldAlert, Siren } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
 import { useConnectionStatus } from '../hooks/useLiveEvents'
 
@@ -7,6 +7,7 @@ const links = [
   { to: '/topology', label: 'Topology', icon: Network },
   { to: '/incidents', label: 'Sự cố', icon: Siren },
   { to: '/security', label: 'An ninh', icon: ShieldAlert },
+  { to: '/activity', label: 'Hoạt động Agent', icon: Activity },
   { to: '/chat', label: 'Copilot', icon: MessageCircle },
 ]
 

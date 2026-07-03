@@ -56,6 +56,17 @@ export interface SecurityAlert {
   attack_techniques: string[]
 }
 
+export interface AgentTrace {
+  id: string
+  subject_type: 'incident' | 'security_alert'
+  subject_id: string
+  tool: string
+  read_only: boolean
+  parameters: Record<string, unknown>
+  result: Record<string, unknown>
+  timestamp: string
+}
+
 export interface ChatMessageTurn {
   role: 'user' | 'assistant'
   content: string

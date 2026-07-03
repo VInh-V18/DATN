@@ -168,7 +168,9 @@ sát và điều khiển.
 - `scripts/evaluate.py` tính các chỉ số ở Bảng 5.3 (tỉ lệ tự khắc phục, MTTR, thời gian
   phản hồi Copilot, tỉ lệ phản ứng an ninh đúng...) trực tiếp từ DB; các chỉ số cần nhãn
   thực tế (độ chính xác chẩn đoán, recall phát hiện tấn công) nhận nhãn qua `--labels`.
-- Dashboard React: Tổng quan, Topology, Sự cố (kèm phê duyệt), An ninh (kèm phê duyệt), Chat Copilot.
+- Dashboard React: Tổng quan, Topology, Sự cố (kèm phê duyệt), An ninh (kèm phê duyệt),
+  **Hoạt động Agent** (nhật ký suy luận thời gian thực của SelfHealingAgent/SecurityAgent
+  qua `GET /api/agent-traces` + WebSocket `agent_trace_added`), Chat Copilot.
 - Runtime nền được nối liền trong `app/main.py` (lifespan): vòng lặp collector
   (`monitoring/collector.py`), syslog UDP listener thật (`security/syslog_listener.py`,
   mặc định cổng 5514) và event bus đồng bộ→bất đồng bộ (`core/events.py`) phát realtime qua

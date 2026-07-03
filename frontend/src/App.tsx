@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard'
 import TopologyPage from './pages/Topology'
 import IncidentsPage from './pages/Incidents'
 import SecurityPage from './pages/Security'
+import ActivityPage from './pages/Activity'
 import ChatPage from './pages/Chat'
 
 function App() {
@@ -16,6 +17,7 @@ function App() {
           <Route path="/topology" element={<TopologyPage />} />
           <Route path="/incidents" element={<IncidentsPage />} />
           <Route path="/security" element={<SecurityPage />} />
+          <Route path="/activity" element={<ActivityPage />} />
           <Route path="/chat" element={<ChatPage />} />
         </Routes>
       </main>
