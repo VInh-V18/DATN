@@ -52,7 +52,9 @@ def _process_syslog_line(source_ip: str, message: str) -> None:
         edge_device_id = settings.security_edge_device_id
         try:
             with GNS3Client() as gns3:
-                executor = ToolExecutor(db=db, gns3_client=gns3, project_id=settings.gns3_project_id or "")
+                executor = ToolExecutor(
+                    db=db, gns3_client=gns3, project_id=settings.gns3_project_id or "", dry_run=settings.agent_dry_run
+                )
                 playbook = SecurityPlaybook(db=db, executor=executor, llm=get_llm_client())
                 playbook.handle_detection(result, edge_node_id=edge_device_id)
                 # SecurityPlaybook/_SqlAlchemySecurityRecorder đã tự phát các sự kiện

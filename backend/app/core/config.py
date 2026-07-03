@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     # Agent / Guardrails - mục 3.3.2
     agent_max_retries: int = 3
     agent_require_approval_for_high_risk: bool = True
+    # "Chạy thử (dry-run) trước khi áp dụng khi có thể" - khi bật, mọi tool thay
+    # đổi hệ thống (push_config, block_ip, isolate_node...) chỉ được mô phỏng,
+    # không thực sự chạm vào thiết bị/GNS3. Bật khi thử nghiệm agent trên lab
+    # thật lần đầu hoặc khi chưa tin tưởng hành vi của LLM đang dùng.
+    agent_dry_run: bool = False
     collector_interval_seconds: int = 10
 
     # Lớp An ninh: syslog UDP listener (mục 3.3.1, 3.3.4)

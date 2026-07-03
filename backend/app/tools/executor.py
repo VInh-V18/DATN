@@ -36,10 +36,19 @@ class ToolResult:
 
 
 class ToolExecutor:
-    def __init__(self, db: Session, gns3_client: GNS3Client, project_id: str) -> None:
+    """dry_run=True mô phỏng mọi tool THAY ĐỔI HỆ THỐNG (guardrail "chạy thử
+    trước khi áp dụng khi có thể", mục 3.3.2): guardrail lệnh cho phép vẫn
+    được áp dụng đầy đủ, nhưng KHÔNG mở phiên SSH hay gọi GNS3 REST API thật -
+    chỉ trả về kết quả mô phỏng để kỹ sư xem trước hành động agent định làm.
+    Các tool chỉ đọc luôn chạy thật kể cả ở chế độ dry-run (không có gì để
+    mô phỏng, và cần dữ liệu thật cho pha Observe/Think).
+    """
+
+    def __init__(self, db: Session, gns3_client: GNS3Client, project_id: str, dry_run: bool = False) -> None:
         self.db = db
         self.gns3 = gns3_client
         self.project_id = project_id
+        self.dry_run = dry_run
 
     def _device(self, node_id: str) -> Device:
         device = self.db.get(Device, node_id)
@@ -59,7 +68,10 @@ class ToolExecutor:
         if spec is None:
             raise GuardrailViolation(f"Tool '{name}' không nằm trong danh sách công cụ được phép")
         try:
-            output = self._dispatch(name, arguments)
+            if self.dry_run and not spec.read_only:
+                output = self._dry_run(name, arguments)
+            else:
+                output = self._dispatch(name, arguments)
             return ToolResult(name=name, arguments=arguments, output=output, ok=True)
         except ToolError as exc:
             return ToolResult(name=name, arguments=arguments, output=None, ok=False, error=str(exc))
@@ -69,6 +81,23 @@ class ToolExecutor:
         if handler is None:
             raise ToolError(f"Chưa hiện thực tool '{name}'")
         return handler(**args)
+
+    def _dry_run(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Áp guardrail lệnh cho phép như bình thường, nhưng không chạm vào
+        thiết bị/GNS3 thật - chỉ trả về hành động sẽ được thực hiện."""
+        if name == "send_command":
+            command = arguments.get("command", "")
+            if not is_command_allowed(command):
+                raise GuardrailViolation(f"[dry-run] Câu lệnh '{command}' không nằm trong danh sách cho phép")
+            return {"dry_run": True, "would_execute": command}
+
+        if name == "push_config":
+            for line in arguments.get("config_lines", []):
+                if not is_command_allowed(line):
+                    raise GuardrailViolation(f"[dry-run] Dòng cấu hình '{line}' không nằm trong danh sách cho phép")
+            return {"dry_run": True, "would_execute": arguments.get("config_lines", [])}
+
+        return {"dry_run": True, "would_execute": f"{name}({arguments})"}
 
     # --- Giám sát ---
 

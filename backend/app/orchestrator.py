@@ -40,7 +40,9 @@ class Orchestrator:
         db = SessionLocal()
         try:
             with GNS3Client() as gns3:
-                executor = ToolExecutor(db=db, gns3_client=gns3, project_id=settings.gns3_project_id or "")
+                executor = ToolExecutor(
+                    db=db, gns3_client=gns3, project_id=settings.gns3_project_id or "", dry_run=settings.agent_dry_run
+                )
                 agent = SelfHealingAgent(db=db, executor=executor, llm=get_llm_client())
                 agent.tu_khac_phuc(incident_id)
         except Exception:

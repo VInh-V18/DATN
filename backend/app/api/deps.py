@@ -28,7 +28,7 @@ def get_tool_executor(
 ) -> ToolExecutor:
     settings = get_settings()
     project_id = settings.gns3_project_id or ""
-    return ToolExecutor(db=db, gns3_client=gns3, project_id=project_id)
+    return ToolExecutor(db=db, gns3_client=gns3, project_id=project_id, dry_run=settings.agent_dry_run)
 
 
 def get_llm() -> LLMClient:

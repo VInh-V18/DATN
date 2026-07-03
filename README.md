@@ -107,6 +107,18 @@ curl -X POST localhost:8000/api/auth/login -d 'username=engineer1&password=secre
 Token trả về (`access_token`) dùng làm Bearer token cho các endpoint phê duyệt
 (`POST /api/incidents/{id}/approve`, `POST /api/security/alerts/{id}/approve` — UC4).
 
+### Chế độ dry-run (chạy thử trước khi áp dụng)
+
+```bash
+AGENT_DRY_RUN=true uvicorn app.main:app --reload
+```
+
+Khi bật, guardrail lệnh cho phép (whitelist) vẫn được áp dụng đầy đủ, nhưng mọi tool
+thay đổi hệ thống (`push_config`, `send_command`, `block_ip`, `isolate_node`,
+`rollback`, `start_node`, `stop_node`) chỉ trả về hành động **sẽ** được thực hiện,
+không mở phiên SSH hay gọi GNS3 REST API thật. Dùng khi mới thử nghiệm agent trên
+lab thật lần đầu, hoặc khi đổi sang một LLM/model chưa tin tưởng hành vi.
+
 ### Frontend
 
 ```bash
@@ -137,7 +149,12 @@ sát và điều khiển.
 
 - GNS3 REST client + Netmiko wrapper (mắt xích giao thức, mục 2.3–2.5).
 - Bộ 15 tool theo Bảng 3.3 cùng guardrails (danh sách lệnh cho phép, phân loại rủi ro,
-  yêu cầu phê duyệt cho hành động rủi ro cao).
+  yêu cầu phê duyệt cho hành động rủi ro cao, **chế độ dry-run** mô phỏng tool thay đổi
+  hệ thống mà không chạm thiết bị/GNS3 thật khi bật `AGENT_DRY_RUN=true`).
+- CI (GitHub Actions): tự động chạy toàn bộ test backend + build frontend trên mỗi push/PR.
+- **Nhật ký suy luận (audit trail)**: `agent_traces` ghi lại từng bước Quan sát/Hành động
+  của SelfHealingAgent và SecurityAgent (không chỉ hành động cuối cùng), hiển thị trực
+  tiếp trên trang "Hoạt động Agent" (`/activity`) qua `GET /api/agent-traces` + WebSocket.
 - LLM client hợp nhất cho Ollama (Qwen local) và Claude API.
 - **Kiến trúc đa tác tử (multi-agent)**: ba agent chuyên trách sống trong `app/agent_core/`
   (thuần logic, không phụ thuộc FastAPI/SQLAlchemy, giao tiếp hệ thống thật qua các cổng
