@@ -15,15 +15,20 @@ backend/            FastAPI + agent runtime (Python)
     schemas/         Pydantic schemas cho API
     gns3/            GNS3 REST API client (mục 2.4)
     automation/      Netmiko device client (mục 2.5)
-    tools/           Đặc tả tool + tool executor (Bảng 3.3, mục 3.4)
+    tools/           Đặc tả tool + tool executor (Bảng 3.3, mục 3.4) + runner.py (adapter -> agent_core)
     llm/             LLM client thống nhất (Ollama / Claude API)
-    agent/           Vòng lặp Self-Healing Observe-Think-Act (mục 3.3.2)
+    agent_core/      LÕI AI Agent thuần logic - KHÔNG phụ thuộc FastAPI/SQLAlchemy (mục 3.3.2, 3.3.3):
+                       react.py (vòng lặp ReAct dùng chung), self_healing.py (SelfHealingEngine),
+                       copilot.py (CopilotEngine), types.py (Plan/ToolOutcome/ToolRunner - cổng thuần),
+                       fakes.py (FakeLLMClient + FakeToolRunner để test/demo không cần API key)
+    agent/           Adapter DB/GNS3 mỏng bọc SelfHealingEngine (mục 3.3.2)
     monitoring/      Collector, Isolation Forest, event correlation (mục 3.3.1)
     security/        Detection rules, MITRE ATT&CK mapping, playbook (mục 3.3.4)
-    copilot/         Trợ lý hội thoại (mục 3.3.3)
+    copilot/         Adapter DB mỏng bọc CopilotEngine (mục 3.3.3)
     api/             FastAPI routers theo Bảng 3.2 + WebSocket + auth (JWT)
   alembic/           Migration schema (thay thế create_all khi lên production)
   scripts/
+    demo_agent.py      Demo lõi AI Agent (ReAct/Self-Healing/Copilot) - không cần API key/DB/GNS3
     gns3_lab.py        Dựng lab GNS3 + seed devices/interfaces/topology_links (Bảng 5.1)
     fault_injection.py Kịch bản gây lỗi chủ động KB01-KB10 (Bảng 5.2)
     evaluate.py        Tính chỉ số đánh giá định lượng (Bảng 5.3)
@@ -55,6 +60,19 @@ Quản lý schema bằng Alembic (khuyến nghị cho môi trường ổn địn
 alembic upgrade head                                   # áp dụng migration mới nhất
 alembic revision --autogenerate -m "mô tả thay đổi"     # tạo migration mới sau khi sửa models
 ```
+
+### Demo lõi AI Agent (không cần API key, GNS3 hay PostgreSQL)
+
+```bash
+python -m scripts.demo_agent          # cả Self-Healing (KB01, KB08) lẫn Copilot
+python -m scripts.demo_agent self-healing
+python -m scripts.demo_agent copilot
+```
+
+Chạy vòng lặp Observe-Think-Act-Verify-Rollback và Copilot thật (`app/agent_core/`)
+với một LLM giả lập phát lại kịch bản định trước (`FakeLLMClient`) và một "mạng"
+tối giản trong bộ nhớ (`FakeToolRunner`) - dùng để kiểm chứng cơ chế suy luận,
+guardrails và tách bạch đọc/ghi hoạt động đúng mà không cần hạ tầng thật.
 
 ### Dựng lab GNS3 và seed dữ liệu
 
@@ -115,7 +133,12 @@ sát và điều khiển.
 - Bộ 15 tool theo Bảng 3.3 cùng guardrails (danh sách lệnh cho phép, phân loại rủi ro,
   yêu cầu phê duyệt cho hành động rủi ro cao).
 - LLM client hợp nhất cho Ollama (Qwen local) và Claude API.
-- Vòng lặp Self-Healing đúng mã giả mục 3.3.2 (observe → think → guardrail → act → verify → rollback).
+- Vòng lặp Self-Healing đúng mã giả mục 3.3.2 (observe → think → guardrail → act → verify → rollback),
+  hiện thực dưới dạng `SelfHealingEngine` thuần logic trong `app/agent_core/` - không phụ thuộc
+  FastAPI/SQLAlchemy, giao tiếp với hệ thống thật qua hai cổng (`ToolRunner`, `IncidentRecorder`).
+  `app/agent/self_healing.py` và `app/copilot/copilot.py` chỉ còn là adapter mỏng nối DB/GNS3 vào
+  lõi này. Đã kiểm chứng bằng 10 unit test (LLM + thiết bị giả lập, không cần API key) và
+  `scripts/demo_agent.py` chạy được ngay trên terminal.
 - Collector + Isolation Forest + tương quan sự kiện (mục 3.3.1).
 - Rule-based detection (port scan / SYN flood / SSH brute-force) + ánh xạ MITRE ATT&CK +
   playbook phản ứng có phê duyệt (mục 3.3.4).

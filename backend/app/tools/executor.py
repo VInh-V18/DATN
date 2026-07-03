@@ -123,9 +123,12 @@ class ToolExecutor:
         with self._device_client(node_id) as dc:
             return dc.send_config_set(config_lines)
 
-    def _tool_ping_test(self, source_node_id: str, target_ip: str) -> dict:
+    def _tool_ping_test(self, source_node_id: str, target_node_id: str) -> dict:
+        target_device = self._device(target_node_id)
+        if not target_device.management_address:
+            raise ToolError(f"Thiết bị đích {target_node_id} chưa có địa chỉ quản lý")
         with self._device_client(source_node_id) as dc:
-            result = dc.ping(target_ip)
+            result = dc.ping(target_device.management_address)
             return {"success_rate": result.success_rate, "rtt_avg_ms": result.rtt_avg_ms}
 
     def _tool_get_routing_table(self, node_id: str) -> str:

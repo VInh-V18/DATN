@@ -157,10 +157,10 @@ TOOL_SPECS: list[ToolSpec] = [
         parameters={
             "type": "object",
             "properties": {
-                "source_node_id": {"type": "string"},
-                "target_ip": {"type": "string"},
+                "source_node_id": {"type": "string", "description": "Định danh thiết bị nguồn"},
+                "target_node_id": {"type": "string", "description": "Định danh thiết bị đích"},
             },
-            "required": ["source_node_id", "target_ip"],
+            "required": ["source_node_id", "target_node_id"],
         },
         read_only=True,
         risk="low",
