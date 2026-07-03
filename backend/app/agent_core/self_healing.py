@@ -28,7 +28,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from app.agent_core.react import run_react
+from app.agent_core.react import ReActResult, run_react
 from app.agent_core.types import Plan, ToolRunner
 from app.llm.client import LLMClient
 from app.tools.specs import TOOL_SPEC_BY_NAME, TOOL_SPECS
@@ -71,6 +71,10 @@ class IncidentRecorder(Protocol):
     """
 
     def log_action(self, incident_id: str, tool: str, arguments: dict[str, Any], result: Any) -> None: ...
+    def log_trace(self, incident_id: str, tool: str, arguments: dict[str, Any], result: Any, read_only: bool) -> None:
+        """Ghi một bước quan sát/suy luận (Think) - audit trail đầy đủ, mục 3.1."""
+        ...
+
     def set_status(self, incident_id: str, status: str) -> None: ...
     def set_pending_action(self, incident_id: str, plan: dict[str, Any] | None) -> None: ...
     def snapshot_device(self, node_id: str) -> str | None: ...
@@ -105,7 +109,7 @@ class SelfHealingEngine:
 
     # --- Think (ReAct) ---
 
-    def think(self, incident: IncidentView, state: dict[str, Any]) -> Plan | None:
+    def think(self, incident: IncidentView, state: dict[str, Any]) -> ReActResult:
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
@@ -117,8 +121,7 @@ class SelfHealingEngine:
                 ),
             },
         ]
-        result = run_react(self.llm, self.tool_runner, messages, TOOL_SPECS, MAX_THINK_STEPS)
-        return result.plan
+        return run_react(self.llm, self.tool_runner, messages, TOOL_SPECS, MAX_THINK_STEPS)
 
     # --- Guardrails (mục 3.3.2) ---
 
@@ -157,15 +160,24 @@ class SelfHealingEngine:
 
         for _ in range(self.max_retries):
             state = self.observe(incident)
-            plan = self.think(incident, state)
+            react_result = self.think(incident, state)
+            for call in react_result.tool_calls:
+                self.recorder.log_trace(incident.id, call["name"], call["arguments"], call["output"], True)
+
+            plan = react_result.plan
             if plan is None:
                 return self._finish(incident.id, "failed", "needs_intervention")
 
             if not self.duoc_phep(plan.tool):
-                self.recorder.log_action(incident.id, plan.tool, plan.arguments, {"guardrail": "tool_not_allowed"})
+                blocked_result = {"guardrail": "tool_not_allowed"}
+                self.recorder.log_action(incident.id, plan.tool, plan.arguments, blocked_result)
+                self.recorder.log_trace(incident.id, plan.tool, plan.arguments, blocked_result, False)
                 return self._finish(incident.id, "failed", "guardrail_blocked")
 
             if self.rui_ro_cao(plan) and not self.cho_phe_duyet(incident, plan):
+                self.recorder.log_trace(
+                    incident.id, plan.tool, plan.arguments, {"proposed": True, "awaiting_approval": True}, False
+                )
                 self.recorder.set_pending_action(
                     incident.id, {"tool": plan.tool, "arguments": plan.arguments, "approved": False}
                 )
@@ -176,9 +188,9 @@ class SelfHealingEngine:
             self.recorder.set_status(incident.id, "remediating")
 
             result = self.tool_runner.run(plan.tool, plan.arguments)
-            self.recorder.log_action(
-                incident.id, plan.tool, plan.arguments, result.output if result.ok else {"error": result.error}
-            )
+            action_result = result.output if result.ok else {"error": result.error}
+            self.recorder.log_action(incident.id, plan.tool, plan.arguments, action_result)
+            self.recorder.log_trace(incident.id, plan.tool, plan.arguments, action_result, False)
 
             if result.ok and self.verify(incident):
                 return self._finish(incident.id, "resolved", "thanh_cong")

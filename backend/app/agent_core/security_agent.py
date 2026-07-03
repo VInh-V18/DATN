@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from app.agent_core.react import run_react
+from app.agent_core.react import ReActResult, run_react
 from app.agent_core.types import Plan, ToolRunner
 from app.llm.client import LLMClient
 from app.tools.specs import TOOL_SPEC_BY_NAME, TOOL_SPECS
@@ -72,6 +72,9 @@ class SecurityAlertRecorder(Protocol):
     def add_attack_mapping(self, alert_id: str, technique_id: str, technique_name: str, tactic: str) -> None: ...
     def set_status(self, alert_id: str, status: str) -> None: ...
     def set_pending_action(self, alert_id: str, plan: dict[str, Any] | None) -> None: ...
+    def log_trace(self, alert_id: str, tool: str, arguments: dict[str, Any], result: Any, read_only: bool) -> None:
+        """Ghi một bước quan sát/suy luận (Think) - audit trail đầy đủ, mục 3.1."""
+        ...
 
 
 class SecurityAgent:
@@ -82,7 +85,7 @@ class SecurityAgent:
 
     # --- Think: LLM phân tích và xác nhận (Hình 3.7, bước 3) ---
 
-    def think(self, detection: DetectionView) -> Plan | None:
+    def think(self, detection: DetectionView) -> ReActResult:
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
@@ -96,8 +99,7 @@ class SecurityAgent:
                 ),
             },
         ]
-        result = run_react(self.llm, self.tool_runner, messages, TOOL_SPECS, MAX_THINK_STEPS)
-        return result.plan
+        return run_react(self.llm, self.tool_runner, messages, TOOL_SPECS, MAX_THINK_STEPS)
 
     # --- Vòng xử lý chính: ghi nhận -> ánh xạ ATT&CK -> think -> guardrail -> act ---
 
@@ -114,7 +116,11 @@ class SecurityAgent:
             self.recorder.set_status(alert_id, "alert_only")
             return SecurityOutcome(status="alert_only", detail="Không có thiết bị biên để phản ứng", alert_id=alert_id)
 
-        plan = self.think(detection)
+        react_result = self.think(detection)
+        for call in react_result.tool_calls:
+            self.recorder.log_trace(alert_id, call["name"], call["arguments"], call["output"], True)
+
+        plan = react_result.plan
         if plan is None:
             self.recorder.set_status(alert_id, "alert_only")
             return SecurityOutcome(status="alert_only", detail="LLM không đề xuất hành động phản ứng cụ thể", alert_id=alert_id)
@@ -125,6 +131,9 @@ class SecurityAgent:
 
         risk = TOOL_SPEC_BY_NAME[plan.tool].risk
         if risk == "high" and not auto_approved:
+            self.recorder.log_trace(
+                alert_id, plan.tool, plan.arguments, {"proposed": True, "awaiting_approval": True}, False
+            )
             self.recorder.set_pending_action(alert_id, {"tool": plan.tool, "arguments": plan.arguments})
             self.recorder.set_status(alert_id, "awaiting_approval")
             return SecurityOutcome(status="awaiting_approval", detail=plan.rationale, alert_id=alert_id)
@@ -137,5 +146,7 @@ class SecurityAgent:
     def _execute(self, alert_id: str, tool: str, arguments: dict[str, Any], detail: str) -> SecurityOutcome:
         result = self.tool_runner.run(tool, arguments)
         status = "blocked" if result.ok else "response_failed"
+        action_result = result.output if result.ok else {"error": result.error}
+        self.recorder.log_trace(alert_id, tool, arguments, action_result, False)
         self.recorder.set_status(alert_id, status)
         return SecurityOutcome(status=status, detail=detail or (result.error or ""), alert_id=alert_id)

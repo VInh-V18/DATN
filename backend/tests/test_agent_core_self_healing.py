@@ -40,6 +40,11 @@ def test_kb01_full_success_resolves_incident() -> None:
     # Trạng thái phải đi qua đúng các pha: diagnosing -> remediating -> resolved.
     statuses = [event_status for _, event_status in recorder.events]
     assert statuses == ["diagnosing", "remediating", "resolved"]
+    # Nhật ký suy luận (audit trail): hành động cuối cùng cũng phải được ghi lại
+    # với read_only=False, phục vụ truy vết đầy đủ (không chỉ action_logs).
+    assert len(recorder.traces) == 1
+    assert recorder.traces[0][1] == "push_config"
+    assert recorder.traces[0][4] is False
 
 
 def test_high_risk_action_requires_approval_then_executes_after_approval() -> None:
@@ -103,6 +108,8 @@ def test_verify_failure_triggers_rollback_then_retry_succeeds() -> None:
     assert recorder.actions[0][1] == "send_command"
     assert recorder.actions[1][1] == "push_config"
     assert ("rollback", {"node_id": "R2", "snapshot": "snapshot::R2"}) in [(c[0], c[1]) for c in tool_runner.calls]
+    # Nhật ký suy luận phải ghi lại cả hai lần thử, theo đúng thứ tự thời gian.
+    assert [t[1] for t in recorder.traces] == ["send_command", "push_config"]
 
 
 def test_exhausts_retries_when_fix_never_verifies() -> None:

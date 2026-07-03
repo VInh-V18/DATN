@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, chat, devices, incidents, security, topology, websocket
+from app.api import agent_traces, auth, chat, devices, incidents, security, topology, websocket
 from app.api.websocket import manager
 from app.core.config import get_settings
 from app.core.database import Base, SessionLocal, engine
@@ -63,6 +63,7 @@ app.include_router(devices.router, prefix="/api", tags=["devices"])
 app.include_router(incidents.router, prefix="/api", tags=["incidents"])
 app.include_router(security.router, prefix="/api", tags=["security"])
 app.include_router(chat.router, prefix="/api", tags=["chat"])
+app.include_router(agent_traces.router, prefix="/api", tags=["agent-traces"])
 app.include_router(websocket.router, tags=["websocket"])
 
 

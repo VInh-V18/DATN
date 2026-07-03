@@ -19,10 +19,11 @@ from sqlalchemy.orm import Session
 
 from app.agent_core.self_healing import IncidentView, RemediationOutcome, SelfHealingEngine
 from app.automation.device_client import DeviceClient, DeviceCredentials
+from app.core.agent_trace import record_trace
 from app.core.config import get_settings
 from app.core.events import emit
 from app.llm.client import LLMClient
-from app.models.models import ActionLog, Device, Incident, IncidentStatus
+from app.models.models import ActionLog, Device, Incident, IncidentStatus, TraceSubjectType
 from app.tools.executor import ToolExecutor
 from app.tools.runner import ExecutorToolRunner
 
@@ -46,6 +47,9 @@ class _SqlAlchemyIncidentRecorder:
             )
         )
         self.db.commit()
+
+    def log_trace(self, incident_id: str, tool: str, arguments: dict[str, Any], result: Any, read_only: bool) -> None:
+        record_trace(self.db, TraceSubjectType.incident, incident_id, tool, arguments, result, read_only)
 
     def set_status(self, incident_id: str, status: str) -> None:
         incident = self.db.get(Incident, incident_id)

@@ -62,6 +62,19 @@ class ActionLogOut(BaseModel):
     timestamp: datetime
 
 
+class AgentTraceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    subject_type: str
+    subject_id: str
+    tool: str
+    read_only: bool
+    parameters: dict[str, Any]
+    result: dict[str, Any]
+    timestamp: datetime
+
+
 class SecurityAlertOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

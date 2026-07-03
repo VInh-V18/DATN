@@ -17,9 +17,10 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.agent_core.security_agent import DetectionView, SecurityAgent
+from app.core.agent_trace import record_trace
 from app.core.events import emit
 from app.llm.client import LLMClient
-from app.models.models import AttackMapping, SecurityAlert, Severity
+from app.models.models import AttackMapping, SecurityAlert, Severity, TraceSubjectType
 from app.security.detection import DetectionResult
 from app.tools.executor import ToolExecutor
 from app.tools.runner import ExecutorToolRunner
@@ -65,6 +66,9 @@ class _SqlAlchemySecurityRecorder:
         assert alert is not None
         alert.details = {**(alert.details or {}), "pending_action": plan}
         self.db.commit()
+
+    def log_trace(self, alert_id: str, tool: str, arguments: dict[str, Any], result: Any, read_only: bool) -> None:
+        record_trace(self.db, TraceSubjectType.security_alert, alert_id, tool, arguments, result, read_only)
 
 
 class SecurityPlaybook:

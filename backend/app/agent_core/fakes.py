@@ -166,11 +166,15 @@ class InMemoryIncidentRecorder(IncidentRecorder):
         self.status: dict[str, str] = {}
         self.pending_action: dict[str, dict[str, Any] | None] = {}
         self.actions: list[tuple[str, str, dict, Any]] = []
+        self.traces: list[tuple[str, str, dict, Any, bool]] = []
         self.resolved: set[str] = set()
         self.events: list[tuple[str, str]] = []
 
     def log_action(self, incident_id: str, tool: str, arguments: dict[str, Any], result: Any) -> None:
         self.actions.append((incident_id, tool, arguments, result))
+
+    def log_trace(self, incident_id: str, tool: str, arguments: dict[str, Any], result: Any, read_only: bool) -> None:
+        self.traces.append((incident_id, tool, arguments, result, read_only))
 
     def set_status(self, incident_id: str, status: str) -> None:
         self.status[incident_id] = status
@@ -192,6 +196,7 @@ class InMemorySecurityRecorder(SecurityAlertRecorder):
         self.alerts: dict[str, dict[str, Any]] = {}
         self.attack_mappings: dict[str, list[dict[str, str]]] = {}
         self.pending_action: dict[str, dict[str, Any] | None] = {}
+        self.traces: list[tuple[str, str, dict, Any, bool]] = []
 
     def create_alert(self, indicator: str, source_ip: str, severity: str, detail: dict[str, Any]) -> str:
         self._counter += 1
@@ -214,3 +219,6 @@ class InMemorySecurityRecorder(SecurityAlertRecorder):
 
     def set_pending_action(self, alert_id: str, plan: dict[str, Any] | None) -> None:
         self.pending_action[alert_id] = plan
+
+    def log_trace(self, alert_id: str, tool: str, arguments: dict[str, Any], result: Any, read_only: bool) -> None:
+        self.traces.append((alert_id, tool, arguments, result, read_only))

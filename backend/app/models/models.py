@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Enum, Float, ForeignKey, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -48,6 +48,11 @@ class UserRole(str, enum.Enum):
     admin = "admin"
     engineer = "engineer"
     viewer = "viewer"
+
+
+class TraceSubjectType(str, enum.Enum):
+    incident = "incident"
+    security_alert = "security_alert"
 
 
 # --- Nhóm hạ tầng và thiết bị ---
@@ -147,6 +152,28 @@ class ActionLog(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     incident: Mapped["Incident"] = relationship(back_populates="action_logs")
+
+
+class AgentTrace(Base):
+    """Nhật ký suy luận (audit trail) - ghi lại từng bước quan sát mà agent thực
+    hiện trong pha Think (ReAct) trước khi đề xuất/thực thi hành động cuối
+    cùng, phục vụ yêu cầu "khả năng kiểm toán" (mục 3.1). Dùng chung cho cả
+    SelfHealingAgent (subject_type=incident) và SecurityAgent
+    (subject_type=security_alert) - không dùng khóa ngoại cứng tới hai bảng
+    khác nhau để tránh ràng buộc quan hệ đa hình phức tạp; subject_id được
+    ứng dụng tự đối chiếu theo subject_type.
+    """
+
+    __tablename__ = "agent_traces"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    subject_type: Mapped[TraceSubjectType] = mapped_column(Enum(TraceSubjectType), nullable=False)
+    subject_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    tool: Mapped[str] = mapped_column(String, nullable=False)
+    read_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    parameters: Mapped[dict] = mapped_column(JSON, default=dict)
+    result: Mapped[dict] = mapped_column(JSON, default=dict)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 # --- Nhóm an ninh và hội thoại ---
