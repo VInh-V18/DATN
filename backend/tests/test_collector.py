@@ -5,11 +5,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from datetime import datetime, timedelta
+
 import app.monitoring.collector as collector_module
 from app.core.database import Base
-from app.models.models import Device, DeviceRole, Incident, IncidentStatus, Interface, LinkStatus, TopologyLink
+from app.models.models import ActionLog, Device, DeviceRole, Incident, IncidentStatus, Interface, LinkStatus, TopologyLink
 from app.monitoring.anomaly import AnomalyScore
-from app.monitoring.collector import _parse_port_number, sync_interface_status
+from app.monitoring.collector import _parse_port_number, find_stuck_incidents, sync_interface_status
 
 
 @pytest.fixture()
@@ -168,3 +170,52 @@ async def test_run_collector_loop_dispatches_incidents_via_orchestrator(monkeypa
     )
 
     assert dispatched == ["inc-1", "inc-2"]
+
+
+def test_find_stuck_incidents_detects_old_incident_with_no_actions(db_session) -> None:
+    now = datetime.utcnow()
+    stuck = Incident(timestamp=now - timedelta(minutes=10), description="kẹt", status=IncidentStatus.diagnosing, device_ids=[])
+    fresh = Incident(timestamp=now - timedelta(seconds=5), description="mới", status=IncidentStatus.remediating, device_ids=[])
+    db_session.add_all([stuck, fresh])
+    db_session.commit()
+
+    stuck_ids = find_stuck_incidents(db_session, now=now)
+
+    assert stuck_ids == [stuck.id]
+
+
+def test_find_stuck_incidents_uses_latest_action_log_not_creation_time(db_session) -> None:
+    now = datetime.utcnow()
+    # Sự cố được tạo đã lâu nhưng vừa có hành động cách đây 10 giây -> KHÔNG được coi là kẹt.
+    incident = Incident(timestamp=now - timedelta(minutes=30), description="đang xử lý", status=IncidentStatus.remediating, device_ids=[])
+    db_session.add(incident)
+    db_session.commit()
+    db_session.add(
+        ActionLog(incident_id=incident.id, tool="send_command", parameters={}, result={}, timestamp=now - timedelta(seconds=10))
+    )
+    db_session.commit()
+
+    assert find_stuck_incidents(db_session, now=now) == []
+
+
+def test_find_stuck_incidents_ignores_terminal_statuses(db_session) -> None:
+    now = datetime.utcnow()
+    resolved = Incident(timestamp=now - timedelta(hours=1), description="xong", status=IncidentStatus.resolved, device_ids=[])
+    awaiting = Incident(timestamp=now - timedelta(hours=1), description="chờ duyệt", status=IncidentStatus.awaiting_approval, device_ids=[])
+    db_session.add_all([resolved, awaiting])
+    db_session.commit()
+
+    assert find_stuck_incidents(db_session, now=now) == []
+
+
+def test_collect_once_redispatches_stuck_incident(db_session, monkeypatch) -> None:
+    now = datetime.utcnow()
+    stuck = Incident(timestamp=now - timedelta(minutes=10), description="kẹt", status=IncidentStatus.diagnosing, device_ids=[])
+    db_session.add(stuck)
+    db_session.commit()
+
+    monkeypatch.setattr(collector_module, "InfluxMetricsStore", _NoopMetricsStore)
+
+    _, incidents_to_dispatch = collector_module.collect_once(db_session, [])
+
+    assert incidents_to_dispatch == [stuck.id]

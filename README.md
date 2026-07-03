@@ -151,9 +151,12 @@ sát và điều khiển.
     đóng vai "MonitorAgent") xác định một sự cố mới, Orchestrator giao ngay cho
     SelfHealingAgent xử lý (chạy trong thread pool riêng, không chặn vòng lặp async của
     FastAPI) - trước đây sự cố chỉ nằm chờ, không có gì tự động kích hoạt agent xử lý.
+    Orchestrator còn tự phục hồi: nếu agent gặp lỗi giữa chừng (LLM/SSH timeout) khiến
+    sự cố kẹt ở "diagnosing"/"remediating" quá 2 phút mà không có hành động mới
+    (`collector.find_stuck_incidents`), sự cố được tự động giao lại.
   - `app/agent/self_healing.py`, `app/security/playbook.py`, `app/copilot/copilot.py` chỉ còn
     là adapter mỏng nối DB/GNS3/Netmiko vào các engine trên.
-  - Kiểm chứng bằng 17 unit test (LLM + thiết bị giả lập, không cần API key) và
+  - Kiểm chứng bằng 14 unit test (LLM + thiết bị giả lập, không cần API key) và
     `scripts/demo_agent.py` chạy được ngay trên terminal cho cả ba agent.
 - Collector (MonitorAgent) + Isolation Forest + tương quan sự kiện (mục 3.3.1).
 - API đầy đủ theo Bảng 3.2 + WebSocket `/ws/events` + xác thực JWT (đăng ký/đăng nhập,

@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -18,13 +18,22 @@ from sqlalchemy.orm import Session
 from app.automation.device_client import DeviceClient, DeviceCredentials
 from app.core.config import get_settings
 from app.core.events import emit
-from app.models.models import Anomaly, Device, IncidentStatus, Interface, LinkStatus, TopologyLink
+from app.models.models import ActionLog, Anomaly, Device, Incident, IncidentStatus, Interface, LinkStatus, TopologyLink
 from app.monitoring.anomaly import AnomalyDetector, build_feature_vector
 from app.monitoring.correlation import EventCorrelator
 from app.monitoring.influx_client import InfluxMetricsStore
 from app.orchestrator import orchestrator
 
 logger = logging.getLogger(__name__)
+
+# Nếu SelfHealingAgent gặp lỗi giữa chừng (LLM/SSH timeout, ngoại lệ chưa
+# lường trước...), sự cố có thể kẹt mãi ở "diagnosing"/"remediating" vì trạng
+# thái này đã được ghi (commit) trước khi lỗi xảy ra và không có gì tự retry.
+# STUCK_RECOVERY_THRESHOLD định nghĩa sau bao lâu kể từ lần chạm cuối (hành
+# động gần nhất, hoặc lúc tạo nếu chưa có hành động nào) thì coi là "kẹt" và
+# giao lại cho Orchestrator xử lý tiếp.
+STUCK_RECOVERY_THRESHOLD = timedelta(minutes=2)
+_STUCK_STATUSES = (IncidentStatus.diagnosing, IncidentStatus.remediating)
 
 # Bộ nhớ đệm mô hình theo từng thiết bị và lịch sử vec-tơ đặc trưng gần nhất,
 # dùng để huấn luyện Isolation Forest theo kiểu cửa sổ trượt (sliding window).
@@ -121,6 +130,29 @@ def sync_interface_status(db: Session, device: Device, live_interfaces: list[dic
     return changed
 
 
+def find_stuck_incidents(db: Session, now: datetime | None = None) -> list[str]:
+    """Tìm các sự cố đang ở trạng thái diagnosing/remediating nhưng đã lâu
+    không có hành động nào mới - dấu hiệu SelfHealingAgent đã crash giữa
+    chừng (ví dụ lỗi gọi LLM hoặc mất kết nối SSH) và cần được giao lại.
+    """
+    now = now or datetime.utcnow()
+    candidates = db.execute(select(Incident).where(Incident.status.in_(_STUCK_STATUSES))).scalars().all()
+
+    stuck_ids: list[str] = []
+    for incident in candidates:
+        last_action = (
+            db.execute(
+                select(ActionLog).where(ActionLog.incident_id == incident.id).order_by(ActionLog.timestamp.desc())
+            )
+            .scalars()
+            .first()
+        )
+        last_touched = last_action.timestamp if last_action else incident.timestamp
+        if now - last_touched > STUCK_RECOVERY_THRESHOLD:
+            stuck_ids.append(incident.id)
+    return stuck_ids
+
+
 def collect_once(db: Session, devices: list[Device]) -> tuple[list[Anomaly], list[str]]:
     """Trả về (các bất thường mới, các incident_id cần giao cho SelfHealingAgent).
 
@@ -189,6 +221,12 @@ def collect_once(db: Session, devices: list[Device]) -> tuple[list[Anomaly], lis
     metrics_store.close()
     if topology_changed:
         emit("topology_updated", {})
+
+    for incident_id in find_stuck_incidents(db):
+        if incident_id not in incidents_to_dispatch:
+            logger.warning("Sự cố %s kẹt quá lâu ở trạng thái xử lý - giao lại cho SelfHealingAgent", incident_id)
+            incidents_to_dispatch.append(incident_id)
+
     return new_anomalies, incidents_to_dispatch
 
 
