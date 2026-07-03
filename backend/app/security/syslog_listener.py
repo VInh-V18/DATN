@@ -19,8 +19,8 @@ import re
 
 from app.core.config import get_settings
 from app.core.database import SessionLocal
-from app.core.events import emit
 from app.gns3.client import GNS3Client
+from app.llm.client import get_llm_client
 from app.models.models import Event, Severity
 from app.security.detection import SecurityDetectionEngine
 from app.security.playbook import SecurityPlaybook
@@ -53,12 +53,10 @@ def _process_syslog_line(source_ip: str, message: str) -> None:
         try:
             with GNS3Client() as gns3:
                 executor = ToolExecutor(db=db, gns3_client=gns3, project_id=settings.gns3_project_id or "")
-                playbook = SecurityPlaybook(db=db, executor=executor)
-                playbook_result = playbook.handle_detection(result, edge_node_id=edge_device_id)
-            emit(
-                "security_alert_updated",
-                {"alert_id": playbook_result.alert_id, "status": playbook_result.status},
-            )
+                playbook = SecurityPlaybook(db=db, executor=executor, llm=get_llm_client())
+                playbook.handle_detection(result, edge_node_id=edge_device_id)
+                # SecurityPlaybook/_SqlAlchemySecurityRecorder đã tự phát các sự kiện
+                # security_alert_created/_updated qua WebSocket, không cần lặp lại ở đây.
         except Exception:
             logger.exception("Không thể chạy playbook phản ứng cho cảnh báo từ %s", source_ip)
     finally:

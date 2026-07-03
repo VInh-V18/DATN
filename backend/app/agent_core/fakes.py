@@ -13,6 +13,7 @@ from typing import Any
 
 from app.agent_core.types import ToolOutcome
 from app.agent_core.self_healing import IncidentRecorder
+from app.agent_core.security_agent import SecurityAlertRecorder
 from app.llm.client import ChatResult, LLMClient, ToolCall
 
 
@@ -183,3 +184,33 @@ class InMemoryIncidentRecorder(IncidentRecorder):
 
     def mark_resolved(self, incident_id: str) -> None:
         self.resolved.add(incident_id)
+
+
+class InMemorySecurityRecorder(SecurityAlertRecorder):
+    def __init__(self) -> None:
+        self._counter = 0
+        self.alerts: dict[str, dict[str, Any]] = {}
+        self.attack_mappings: dict[str, list[dict[str, str]]] = {}
+        self.pending_action: dict[str, dict[str, Any] | None] = {}
+
+    def create_alert(self, indicator: str, source_ip: str, severity: str, detail: dict[str, Any]) -> str:
+        self._counter += 1
+        alert_id = f"alert-{self._counter}"
+        self.alerts[alert_id] = {
+            "indicator": indicator,
+            "source_ip": source_ip,
+            "severity": severity,
+            "detail": detail,
+            "status": "detected",
+        }
+        self.attack_mappings[alert_id] = []
+        return alert_id
+
+    def add_attack_mapping(self, alert_id: str, technique_id: str, technique_name: str, tactic: str) -> None:
+        self.attack_mappings[alert_id].append({"technique_id": technique_id, "technique_name": technique_name, "tactic": tactic})
+
+    def set_status(self, alert_id: str, status: str) -> None:
+        self.alerts[alert_id]["status"] = status
+
+    def set_pending_action(self, alert_id: str, plan: dict[str, Any] | None) -> None:
+        self.pending_action[alert_id] = plan

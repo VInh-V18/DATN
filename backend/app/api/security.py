@@ -2,9 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_tool_executor, require_approver
+from app.api.deps import get_llm, get_tool_executor, require_approver
 from app.core.database import get_db
+from app.core.events import emit
 from app.core.security import TokenPayload
+from app.llm.client import LLMClient
 from app.models.models import SecurityAlert
 from app.schemas.schemas import ApprovalRequest, SecurityAlertOut
 from app.security.playbook import SecurityPlaybook
@@ -37,6 +39,7 @@ def approve_security_response(
     approval: ApprovalRequest,
     db: Session = Depends(get_db),
     executor: ToolExecutor = Depends(get_tool_executor),
+    llm: LLMClient = Depends(get_llm),
     approver: TokenPayload = Depends(require_approver),
 ) -> dict:
     """Phê duyệt phản ứng an ninh rủi ro cao (block_ip / isolate_node), đồng nhất guardrail với mục 3.3.2."""
@@ -47,8 +50,9 @@ def approve_security_response(
         alert.status = "rejected"
         alert.details = {**(alert.details or {}), "rejected_by": approver.username}
         db.commit()
+        emit("security_alert_updated", {"alert_id": alert.id, "status": alert.status})
         return {"status": alert.status}
 
-    playbook = SecurityPlaybook(db=db, executor=executor)
+    playbook = SecurityPlaybook(db=db, executor=executor, llm=llm)
     result = playbook.approve_and_execute(alert)
     return {"status": result.status, "alert_id": result.alert_id}

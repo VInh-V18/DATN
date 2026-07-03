@@ -17,13 +17,17 @@ backend/            FastAPI + agent runtime (Python)
     automation/      Netmiko device client (mục 2.5)
     tools/           Đặc tả tool + tool executor (Bảng 3.3, mục 3.4) + runner.py (adapter -> agent_core)
     llm/             LLM client thống nhất (Ollama / Claude API)
-    agent_core/      LÕI AI Agent thuần logic - KHÔNG phụ thuộc FastAPI/SQLAlchemy (mục 3.3.2, 3.3.3):
+    agent_core/      LÕI đa tác tử (multi-agent) thuần logic - KHÔNG phụ thuộc FastAPI/SQLAlchemy
+                     (mục 3.3.2, 3.3.3, 3.3.4):
                        react.py (vòng lặp ReAct dùng chung), self_healing.py (SelfHealingEngine),
+                       security_agent.py (SecurityAgent - pha LLM Think theo Hình 3.7),
                        copilot.py (CopilotEngine), types.py (Plan/ToolOutcome/ToolRunner - cổng thuần),
                        fakes.py (FakeLLMClient + FakeToolRunner để test/demo không cần API key)
+    orchestrator.py  Điều phối đa tác tử: giao sự cố mới từ MonitorAgent (collector + tương
+                     quan sự kiện) cho SelfHealingAgent, chạy trong thread pool riêng
     agent/           Adapter DB/GNS3 mỏng bọc SelfHealingEngine (mục 3.3.2)
-    monitoring/      Collector, Isolation Forest, event correlation (mục 3.3.1)
-    security/        Detection rules, MITRE ATT&CK mapping, playbook (mục 3.3.4)
+    monitoring/      Collector (MonitorAgent), Isolation Forest, event correlation (mục 3.3.1)
+    security/        Detection rules (luật ngưỡng) + playbook.py (adapter DB/GNS3 bọc SecurityAgent, mục 3.3.4)
     copilot/         Adapter DB mỏng bọc CopilotEngine (mục 3.3.3)
     api/             FastAPI routers theo Bảng 3.2 + WebSocket + auth (JWT)
   alembic/           Migration schema (thay thế create_all khi lên production)
@@ -64,15 +68,17 @@ alembic revision --autogenerate -m "mô tả thay đổi"     # tạo migration 
 ### Demo lõi AI Agent (không cần API key, GNS3 hay PostgreSQL)
 
 ```bash
-python -m scripts.demo_agent          # cả Self-Healing (KB01, KB08) lẫn Copilot
-python -m scripts.demo_agent self-healing
+python -m scripts.demo_agent          # cả ba agent: Self-Healing, Security, Copilot
+python -m scripts.demo_agent self-healing   # KB01: tự khắc phục cổng bị shutdown
+python -m scripts.demo_agent security       # KB08/KB09: SecurityAgent xác nhận + phản ứng
 python -m scripts.demo_agent copilot
 ```
 
-Chạy vòng lặp Observe-Think-Act-Verify-Rollback và Copilot thật (`app/agent_core/`)
-với một LLM giả lập phát lại kịch bản định trước (`FakeLLMClient`) và một "mạng"
-tối giản trong bộ nhớ (`FakeToolRunner`) - dùng để kiểm chứng cơ chế suy luận,
-guardrails và tách bạch đọc/ghi hoạt động đúng mà không cần hạ tầng thật.
+Chạy vòng lặp Observe-Think-Act-Verify-Rollback, SecurityAgent (pha LLM Think theo
+Hình 3.7) và Copilot thật (`app/agent_core/`) với một LLM giả lập phát lại kịch bản
+định trước (`FakeLLMClient`) và một "mạng" tối giản trong bộ nhớ (`FakeToolRunner`) -
+dùng để kiểm chứng cơ chế suy luận, guardrails và tách bạch đọc/ghi hoạt động đúng
+mà không cần hạ tầng thật.
 
 ### Dựng lab GNS3 và seed dữ liệu
 
@@ -133,16 +139,23 @@ sát và điều khiển.
 - Bộ 15 tool theo Bảng 3.3 cùng guardrails (danh sách lệnh cho phép, phân loại rủi ro,
   yêu cầu phê duyệt cho hành động rủi ro cao).
 - LLM client hợp nhất cho Ollama (Qwen local) và Claude API.
-- Vòng lặp Self-Healing đúng mã giả mục 3.3.2 (observe → think → guardrail → act → verify → rollback),
-  hiện thực dưới dạng `SelfHealingEngine` thuần logic trong `app/agent_core/` - không phụ thuộc
-  FastAPI/SQLAlchemy, giao tiếp với hệ thống thật qua hai cổng (`ToolRunner`, `IncidentRecorder`).
-  `app/agent/self_healing.py` và `app/copilot/copilot.py` chỉ còn là adapter mỏng nối DB/GNS3 vào
-  lõi này. Đã kiểm chứng bằng 10 unit test (LLM + thiết bị giả lập, không cần API key) và
-  `scripts/demo_agent.py` chạy được ngay trên terminal.
-- Collector + Isolation Forest + tương quan sự kiện (mục 3.3.1).
-- Rule-based detection (port scan / SYN flood / SSH brute-force) + ánh xạ MITRE ATT&CK +
-  playbook phản ứng có phê duyệt (mục 3.3.4).
-- Copilot hội thoại tách bạch hành động đọc (tự do) và hành động ghi (cần xác nhận) (mục 3.3.3).
+- **Kiến trúc đa tác tử (multi-agent)**: ba agent chuyên trách sống trong `app/agent_core/`
+  (thuần logic, không phụ thuộc FastAPI/SQLAlchemy, giao tiếp hệ thống thật qua các cổng
+  `ToolRunner`/`IncidentRecorder`/`SecurityAlertRecorder`):
+  - `SelfHealingEngine` - vòng lặp Observe-Think-Act-Verify-Rollback đúng mã giả mục 3.3.2.
+  - `SecurityAgent` - luồng Hình 3.7: phát hiện theo luật → **LLM phân tích và xác nhận (Think)**
+    → tự chọn hành động phản ứng (`block_ip`/`isolate_node`, không còn tra bảng tĩnh) → ánh xạ
+    ATT&CK → guardrail phê duyệt.
+  - `CopilotEngine` - hội thoại, tách bạch đọc (tự do)/ghi (cần xác nhận), mục 3.3.3.
+  - `app/orchestrator.py` **điều phối**: khi lớp Giám sát (collector + tương quan sự kiện,
+    đóng vai "MonitorAgent") xác định một sự cố mới, Orchestrator giao ngay cho
+    SelfHealingAgent xử lý (chạy trong thread pool riêng, không chặn vòng lặp async của
+    FastAPI) - trước đây sự cố chỉ nằm chờ, không có gì tự động kích hoạt agent xử lý.
+  - `app/agent/self_healing.py`, `app/security/playbook.py`, `app/copilot/copilot.py` chỉ còn
+    là adapter mỏng nối DB/GNS3/Netmiko vào các engine trên.
+  - Kiểm chứng bằng 17 unit test (LLM + thiết bị giả lập, không cần API key) và
+    `scripts/demo_agent.py` chạy được ngay trên terminal cho cả ba agent.
+- Collector (MonitorAgent) + Isolation Forest + tương quan sự kiện (mục 3.3.1).
 - API đầy đủ theo Bảng 3.2 + WebSocket `/ws/events` + xác thực JWT (đăng ký/đăng nhập,
   bảo vệ hai endpoint phê duyệt UC4 bằng vai trò engineer/admin).
 - Alembic migration cho toàn bộ schema (Bảng 3.4).

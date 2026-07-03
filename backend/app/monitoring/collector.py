@@ -18,10 +18,11 @@ from sqlalchemy.orm import Session
 from app.automation.device_client import DeviceClient, DeviceCredentials
 from app.core.config import get_settings
 from app.core.events import emit
-from app.models.models import Anomaly, Device, Interface, LinkStatus, TopologyLink
+from app.models.models import Anomaly, Device, IncidentStatus, Interface, LinkStatus, TopologyLink
 from app.monitoring.anomaly import AnomalyDetector, build_feature_vector
 from app.monitoring.correlation import EventCorrelator
 from app.monitoring.influx_client import InfluxMetricsStore
+from app.orchestrator import orchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -120,10 +121,17 @@ def sync_interface_status(db: Session, device: Device, live_interfaces: list[dic
     return changed
 
 
-def collect_once(db: Session, devices: list[Device]) -> list[Anomaly]:
+def collect_once(db: Session, devices: list[Device]) -> tuple[list[Anomaly], list[str]]:
+    """Trả về (các bất thường mới, các incident_id cần giao cho SelfHealingAgent).
+
+    Một incident cần giao việc khi vẫn đang ở trạng thái "open" - nghĩa là
+    MonitorAgent (collector + tương quan sự kiện) vừa tạo/cập nhật nó và chưa
+    agent nào bắt đầu xử lý (xem app.orchestrator.Orchestrator).
+    """
     metrics_store = InfluxMetricsStore()
     correlator = EventCorrelator(db)
     new_anomalies: list[Anomaly] = []
+    incidents_to_dispatch: list[str] = []
 
     topology_changed = False
     for device in devices:
@@ -173,28 +181,40 @@ def collect_once(db: Session, devices: list[Device]) -> list[Anomaly]:
             db.add(anomaly)
             db.commit()
             db.refresh(anomaly)
-            correlator.correlate(anomaly)
+            incident = correlator.correlate(anomaly)
+            if incident.status == IncidentStatus.open and incident.id not in incidents_to_dispatch:
+                incidents_to_dispatch.append(incident.id)
             new_anomalies.append(anomaly)
 
     metrics_store.close()
     if topology_changed:
         emit("topology_updated", {})
-    return new_anomalies
+    return new_anomalies, incidents_to_dispatch
 
 
 async def run_collector_loop(session_factory, stop_event: asyncio.Event | None = None) -> None:
-    """Vòng lặp nền chạy định kỳ (mặc định 5-15 giây, mục 3.3.1)."""
+    """Vòng lặp nền chạy định kỳ (mặc định 5-15 giây, mục 3.3.1).
+
+    Sau mỗi chu kỳ thu thập, các sự cố mới phát hiện được giao ngay cho
+    SelfHealingAgent qua Orchestrator (chạy trong thread pool riêng - xem
+    app.orchestrator - để không chặn vòng lặp sự kiện async của FastAPI).
+    """
     settings = get_settings()
     stop_event = stop_event or asyncio.Event()
     while not stop_event.is_set():
         db = session_factory()
+        incidents_to_dispatch: list[str] = []
         try:
             devices = db.query(Device).all()
-            collect_once(db, devices)
+            _, incidents_to_dispatch = collect_once(db, devices)
         except Exception:
             logger.exception("Lỗi trong vòng lặp thu thập dữ liệu giám sát")
         finally:
             db.close()
+
+        for incident_id in incidents_to_dispatch:
+            await orchestrator.dispatch_incident(incident_id)
+
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=settings.collector_interval_seconds)
         except asyncio.TimeoutError:

@@ -6,8 +6,16 @@ hoạt động đúng cơ chế, bằng một LLM giả lập (FakeLLMClient) ph
 
 Sử dụng:
     python -m scripts.demo_agent self-healing   # kịch bản KB01 (Bảng 5.2)
+    python -m scripts.demo_agent security       # kịch bản KB08/KB09 (Bảng 5.2)
     python -m scripts.demo_agent copilot        # hỏi đáp + đề xuất hành động
-    python -m scripts.demo_agent all            # chạy cả hai (mặc định)
+    python -m scripts.demo_agent all            # chạy cả ba (mặc định)
+
+Minh hoạ kiến trúc đa tác tử (multi-agent): mỗi kịch bản dưới đây tương ứng
+với một agent chuyên trách khác nhau trong app.agent_core - SelfHealingEngine
+(tự khắc phục sự cố vận hành), SecurityAgent (phát hiện + phản ứng an ninh,
+có pha LLM Think xác nhận theo Hình 3.7) và CopilotEngine (hội thoại). Trong
+hệ thống thật, app.orchestrator.Orchestrator là nơi giao việc từ lớp Giám sát
+(MonitorAgent = collector + tương quan sự kiện) sang các agent này.
 """
 
 from __future__ import annotations
@@ -21,8 +29,10 @@ from app.agent_core.fakes import (
     FakeLLMClient,
     FakeToolRunner,
     InMemoryIncidentRecorder,
+    InMemorySecurityRecorder,
     ScriptedStep,
 )
+from app.agent_core.security_agent import DetectionView, SecurityAgent
 from app.agent_core.self_healing import IncidentView, SelfHealingEngine
 
 RULE = "-" * 72
@@ -72,36 +82,54 @@ def demo_self_healing() -> None:
     print("\n✓ Vòng lặp Observe-Think-Act-Verify hoạt động đúng: agent tự chẩn đoán, tự sửa và tự kiểm chứng.")
 
 
-def demo_high_risk_approval() -> None:
-    _print_header("KỊCH BẢN KB08 (Bảng 5.2): quét cổng -> đề xuất chặn IP (cần phê duyệt)")
+def demo_security_agent() -> None:
+    _print_header("KỊCH BẢN KB08 (Bảng 5.2): quét cổng -> SecurityAgent xác nhận -> đề xuất chặn IP (cần phê duyệt)")
 
     devices = {"R1": FakeDevice(id="R1")}
     tool_runner = FakeToolRunner(devices)
-    recorder = InMemoryIncidentRecorder()
+    recorder = InMemorySecurityRecorder()
     plan_call = [("block_ip", {"node_id": "R1", "ip_address": "203.0.113.9"})]
 
-    llm1 = FakeLLMClient([ScriptedStep(content="Phát hiện quét cổng từ 203.0.113.9, đề xuất chặn tại R1.", tool_calls=plan_call)])
-    engine1 = SelfHealingEngine(llm=llm1, tool_runner=tool_runner, recorder=recorder, max_retries=3)
-    incident = IncidentView(id="demo-kb08", description="Quét cổng từ 203.0.113.9", device_ids=["R1"])
-
-    outcome1 = engine1.tu_khac_phuc(incident)
-    print(f"Lượt 1 (chưa phê duyệt): {outcome1.status} - guardrail chặn thực thi block_ip (hành động rủi ro cao).")
-    assert outcome1.status == "awaiting_approval"
-    assert recorder.actions == []
-
-    approved_incident = IncidentView(
-        id="demo-kb08",
-        description="Quét cổng từ 203.0.113.9",
-        device_ids=["R1"],
-        pending_action={**recorder.pending_action["demo-kb08"], "approved": True},
+    llm1 = FakeLLMClient(
+        [ScriptedStep(content="Xác nhận đây là hành vi quét cổng (T1046), đề xuất chặn IP tại router biên R1.", tool_calls=plan_call)]
     )
-    llm2 = FakeLLMClient([ScriptedStep(content="Phát hiện quét cổng từ 203.0.113.9, đề xuất chặn tại R1.", tool_calls=plan_call)])
-    engine2 = SelfHealingEngine(llm=llm2, tool_runner=tool_runner, recorder=recorder, max_retries=3)
-    outcome2 = engine2.tu_khac_phuc(approved_incident)
+    agent1 = SecurityAgent(llm=llm1, tool_runner=tool_runner, recorder=recorder)
+    detection = DetectionView(indicator="port_scan", source_ip="203.0.113.9", detail={"distinct_ports": 22}, edge_node_id="R1")
 
-    print(f"Lượt 2 (đã phê duyệt): {outcome2.status} - đã thực thi {recorder.actions[-1][1]}.")
-    assert outcome2.status == "resolved"
-    print("\n✓ Guardrail hoạt động đúng: hành động rủi ro cao bị giữ lại chờ con người, chỉ chạy sau khi được duyệt.")
+    outcome1 = agent1.handle(detection)
+    print(f"Lượt 1 (chưa phê duyệt): {outcome1.status} - LLM đã xác nhận và đề xuất block_ip, nhưng guardrail giữ lại vì rủi ro cao.")
+    assert outcome1.status == "awaiting_approval"
+    assert tool_runner.calls == []
+
+    print(f"\nKỹ sư xem xét và phê duyệt cảnh báo {outcome1.alert_id}...")
+    outcome2 = agent1.approve(outcome1.alert_id, recorder.pending_action[outcome1.alert_id])
+    print(f"Lượt 2 (đã phê duyệt): {outcome2.status} - đã thực thi {tool_runner.calls[-1][0]}.")
+    assert outcome2.status == "blocked"
+    print("\n✓ SecurityAgent hoạt động đúng luồng Hình 3.7: phát hiện theo luật → LLM xác nhận (Think) →")
+    print("  ánh xạ ATT&CK → guardrail phê duyệt cho hành động rủi ro cao → thực thi.")
+
+
+def demo_security_agent_syn_flood() -> None:
+    _print_header("KỊCH BẢN KB09 (Bảng 5.2): SYN flood -> SecurityAgent tự chọn cô lập thiết bị")
+
+    devices = {"R1": FakeDevice(id="R1", interfaces={"Gi0/0": FakeInterface(name="Gi0/0", status="up")})}
+    tool_runner = FakeToolRunner(devices)
+    recorder = InMemorySecurityRecorder()
+    llm = FakeLLMClient(
+        [ScriptedStep(content="SYN flood cường độ cao, mức độ nghiêm trọng - cô lập thiết bị ngay để bảo vệ hạ tầng.",
+                      tool_calls=[("isolate_node", {"node_id": "R1"})])]
+    )
+    agent = SecurityAgent(llm=llm, tool_runner=tool_runner, recorder=recorder)
+    detection = DetectionView(indicator="syn_flood", source_ip="198.51.100.4", detail={"half_open_count": 320}, edge_node_id="R1")
+
+    # auto_approved=True chỉ để minh hoạ nhánh thực thi ngay trong demo; trong hệ thống
+    # thật, isolate_node vẫn là hành động rủi ro cao và mặc định cần phê duyệt như trên.
+    outcome = agent.handle(detection, auto_approved=True)
+    print(f"Kết quả: {outcome.status} - LLM tự quyết định gọi 'isolate_node' (không phải tra bảng tĩnh).")
+    print(f"Trạng thái cổng R1/Gi0/0 sau phản ứng: {devices['R1'].interfaces['Gi0/0'].status}")
+    assert outcome.status == "blocked"
+    assert devices["R1"].interfaces["Gi0/0"].status == "down"
+    print("\n✓ SecurityAgent tự suy luận chọn hành động phù hợp với mức độ nghiêm trọng, thay vì rule cứng.")
 
 
 def demo_copilot() -> None:
@@ -150,7 +178,9 @@ def main() -> None:
     target = sys.argv[1] if len(sys.argv) > 1 else "all"
     if target in ("self-healing", "all"):
         demo_self_healing()
-        demo_high_risk_approval()
+    if target in ("security", "all"):
+        demo_security_agent()
+        demo_security_agent_syn_flood()
     if target in ("copilot", "all"):
         demo_copilot()
     print(f"\n{RULE}\nHoàn tất demo lõi AI Agent (app.agent_core) - không cần API key/DB/GNS3.\n{RULE}")
